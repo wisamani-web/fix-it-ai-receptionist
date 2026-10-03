@@ -18,8 +18,8 @@ if (!RESEND_API_KEY) {
 }
 
 const fastify = Fastify();
-fastify.register(fastifyFormBody);
-fastify.register(fastifyWs);
+await fastify.register(fastifyFormBody);
+await fastify.register(fastifyWs);
 
 const PORT = process.env.PORT || 5050;
 const callSessions = new Map();
