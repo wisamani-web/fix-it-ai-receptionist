@@ -3,16 +3,24 @@ import WebSocket from 'ws';
 import dotenv from 'dotenv';
 import fastifyFormBody from '@fastify/formbody';
 import fastifyWs from '@fastify/websocket';
+import nodemailer from 'nodemailer';
 
-// Load environment variables from .env file
+// Load environment variables
 dotenv.config();
 
-// Retrieve the OpenAI API key from environment variables.
-const { OPENAI_API_KEY } = process.env;
+const {
+    OPENAI_API_KEY,
+    GMAIL_USER,
+    GMAIL_APP_PASSWORD
+} = process.env;
 
 if (!OPENAI_API_KEY) {
-    console.error('Missing OpenAI API key. Please set it in the .env file.');
+    console.error('Missing OPENAI_API_KEY.');
     process.exit(1);
+}
+
+if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    console.warn('Gmail settings are missing. Calls will work, but email summaries may not send.');
 }
 
 // Initialize Fastify
@@ -20,7 +28,10 @@ const fastify = Fastify();
 fastify.register(fastifyFormBody);
 fastify.register(fastifyWs);
 
-// Constants
+// ---------------------------------------------------------
+// CLAIRE - FIX IT AFTER-HOURS RECEPTIONIST
+// ---------------------------------------------------------
+
 const SYSTEM_MESSAGE = `
 You are Claire, the after-hours receptionist for Fix It Appliance Service.
 
@@ -54,7 +65,7 @@ Conversation style:
 - Do not interrogate the customer with a checklist.
 - Make the conversation feel natural.
 - If the customer already gives multiple pieces of information, remember them and do not ask for them again.
-- Acknowledge problems naturally, for example:
+- Acknowledge problems naturally with phrases such as:
   "I understand."
   "I'm sorry you're dealing with that."
   "Thank you, that helps."
@@ -62,7 +73,7 @@ Conversation style:
 - Never overuse apologies.
 - Do not repeatedly say "thank you" after every answer.
 - If the caller sounds frustrated, slow down and be especially calm and helpful.
-- If the customer says they already had a technician visit or the appliance is still having the same problem, clearly mark it as an existing service concern or callback for the office.
+- If the customer says they already had a technician visit or the appliance is still having the same problem, clearly treat it as an existing service concern or callback.
 
 Important rules:
 - Never diagnose the appliance.
@@ -88,13 +99,15 @@ Language rules:
 - Never switch to another language because of the customer's accent, pronunciation, name, address, appliance brand, or isolated word.
 - Names such as Sallam, Wisam, Mahdi, Mozzi, Elijah, Brevan, LG, Samsung, Frigidaire, Midea, and appliance terms must not trigger a language change.
 - If a word is unclear, stay in English and politely ask the caller to repeat or spell it.
-- If the customer speaks another language, continue in English and say that the after-hours service is currently available in English.
+- If the customer speaks another language, continue in English and say the after-hours service is currently available in English.
 - Never automatically switch languages.
 
 Common appliance vocabulary:
 - fridge means refrigerator
+- refrigerator
 - freezer
 - washer means washing machine
+- washing machine
 - dryer
 - dishwasher
 - range
@@ -123,11 +136,67 @@ At the end of the call:
 
 Never discuss unrelated topics, jokes, politics, general trivia, or subjects unrelated to Fix It Appliance Service.
 `;
-const VOICE = 'marin';
-const TEMPERATURE = 0.8; // Controls the randomness of the AI's responses
-const PORT = process.env.PORT || 5050; // Allow dynamic port assignment
 
-// List of Event Types to log to the console. See the OpenAI Realtime API Documentation: https://platform.openai.com/docs/api-reference/realtime
+const VOICE = 'marin';
+const TEMPERATURE = 0.8;
+const PORT = process.env.PORT || 5050;
+
+// ---------------------------------------------------------
+// EMAIL
+// ---------------------------------------------------------
+
+const mailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD
+    }
+});
+
+async function sendAfterHoursEmail(callTranscript, callerNumber) {
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+        console.log('Gmail configuration missing. Email not sent.');
+        return;
+    }
+
+    if (!callTranscript || callTranscript.length === 0) {
+        console.log('No transcript available. Email not sent.');
+        return;
+    }
+
+    const transcriptText = callTranscript.join('\n\n');
+
+    try {
+        await mailTransporter.sendMail({
+            from: `"Fix It After-Hours" <${GMAIL_USER}>`,
+            to: 'techniciansfixit@gmail.com',
+            subject: `New Fix It After-Hours Call${callerNumber ? ` - ${callerNumber}` : ''}`,
+            text: `NEW AFTER-HOURS SERVICE CALL
+
+Caller Number: ${callerNumber || 'Not available'}
+
+CALL TRANSCRIPT
+----------------------------------------
+
+${transcriptText}
+
+----------------------------------------
+
+This message was automatically created by Claire,
+Fix It Appliance Service After-Hours Receptionist.
+`
+        });
+
+        console.log('After-hours email sent successfully.');
+    } catch (error) {
+        console.error('Error sending after-hours email:', error);
+    }
+}
+
+// ---------------------------------------------------------
+// LOGGING
+// ---------------------------------------------------------
+
 const LOG_EVENT_TYPES = [
     'error',
     'response.content.done',
@@ -136,242 +205,523 @@ const LOG_EVENT_TYPES = [
     'input_audio_buffer.committed',
     'input_audio_buffer.speech_stopped',
     'input_audio_buffer.speech_started',
+    'conversation.item.input_audio_transcription.completed',
+    'response.output_audio_transcript.done',
     'session.created',
     'session.updated'
 ];
 
-// Show AI response elapsed timing calculations
 const SHOW_TIMING_MATH = false;
 
-// Root Route
+// ---------------------------------------------------------
+// ROOT ROUTE
+// ---------------------------------------------------------
+
 fastify.get('/', async (request, reply) => {
-    reply.send({ message: 'Twilio Media Stream Server is running!' });
+    reply.send({
+        message: 'Fix It Claire After-Hours Receptionist is running!'
+    });
 });
 
-// Route for Twilio to handle incoming calls
-// <Say> punctuation to improve text-to-speech translation
+// ---------------------------------------------------------
+// TWILIO INCOMING CALL
+// ---------------------------------------------------------
+
 fastify.all('/incoming-call', async (request, reply) => {
+
+    const callerNumber =
+        request.body?.From ||
+        request.query?.From ||
+        'Unknown';
+
     const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-                          <Response>
-                              <Say voice="Google.en-US-Chirp3-HD-Aoede">Thank you for calling Fix It Appliance Service. Our office is currently closed, but Claire, our after-hours receptionist, can take care of your service request and make sure our office has everything they need to follow up with you.</Say>
-                                <Pause length="1"/>
-                                <Say voice="Google.en-US-Chirp3-HD-Aoede">Hi, this is Claire. May I start with your name?</Say>
-                              <Connect>
-                                  <Stream url="wss://${request.headers.host}/media-stream" />
-                              </Connect>
-                          </Response>`;
+<Response>
+    <Say voice="Google.en-US-Chirp3-HD-Aoede">Thank you for calling Fix It Appliance Service. Our office is currently closed, but Claire, our after-hours receptionist, can take care of your service request and make sure our office has everything they need to follow up with you.</Say>
+
+    <Pause length="1"/>
+
+    <Say voice="Google.en-US-Chirp3-HD-Aoede">Hi, this is Claire. May I start with your name?</Say>
+
+    <Connect>
+        <Stream url="wss://${request.headers.host}/media-stream">
+            <Parameter name="callerNumber" value="${callerNumber}" />
+        </Stream>
+    </Connect>
+</Response>`;
 
     reply.type('text/xml').send(twimlResponse);
 });
 
-// WebSocket route for media-stream
+// ---------------------------------------------------------
+// MEDIA STREAM
+// ---------------------------------------------------------
+
 fastify.register(async (fastify) => {
-    fastify.get('/media-stream', { websocket: true }, (connection, req) => {
-        console.log('Client connected');
 
-        // Connection-specific state
-        let streamSid = null;
-        let latestMediaTimestamp = 0;
-        let lastAssistantItem = null;
-        let markQueue = [];
-        let responseStartTimestampTwilio = null;
+    fastify.get(
+        '/media-stream',
+        { websocket: true },
+        (connection, req) => {
 
-        const openAiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature=${TEMPERATURE}`, {
-            headers: {
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-            }
-        });
+            console.log('Client connected');
 
-        // Control initial session with OpenAI
-        const initializeSession = () => {
-            const sessionUpdate = {
-                type: 'session.update',
-                session: {
-                    type: 'realtime',
-                    model: "gpt-realtime",
-                    output_modalities: ["audio"],
-                    audio: {
-                        input: { format: { type: 'audio/pcmu' }, turn_detection: { type: "server_vad" } },
-                        output: { format: { type: 'audio/pcmu' }, voice: VOICE },
-                    },
-                    instructions: SYSTEM_MESSAGE,
-                },
+            let streamSid = null;
+            let latestMediaTimestamp = 0;
+            let lastAssistantItem = null;
+            let markQueue = [];
+            let responseStartTimestampTwilio = null;
+
+            let callTranscript = [];
+            let callerNumber = null;
+            let emailSent = false;
+
+            const openAiWs = new WebSocket(
+                `wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature=${TEMPERATURE}`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${OPENAI_API_KEY}`
+                    }
+                }
+            );
+
+            // -------------------------------------------------
+            // INITIALIZE OPENAI SESSION
+            // -------------------------------------------------
+
+            const initializeSession = () => {
+
+                const sessionUpdate = {
+                    type: 'session.update',
+
+                    session: {
+                        type: 'realtime',
+
+                        model: 'gpt-realtime',
+
+                        output_modalities: ['audio'],
+
+                        audio: {
+
+                            input: {
+                                format: {
+                                    type: 'audio/pcmu'
+                                },
+
+                                transcription: {
+                                    model: 'gpt-transcribe'
+                                },
+
+                                turn_detection: {
+                                    type: 'server_vad'
+                                }
+                            },
+
+                            output: {
+                                format: {
+                                    type: 'audio/pcmu'
+                                },
+
+                                voice: VOICE
+                            }
+                        },
+
+                        instructions: SYSTEM_MESSAGE
+                    }
+                };
+
+                console.log('Sending session update');
+
+                openAiWs.send(
+                    JSON.stringify(sessionUpdate)
+                );
             };
 
-            console.log('Sending session update:', JSON.stringify(sessionUpdate));
-            openAiWs.send(JSON.stringify(sessionUpdate));
+            // -------------------------------------------------
+            // HANDLE CUSTOMER INTERRUPTIONS
+            // -------------------------------------------------
 
-            // Uncomment the following line to have AI speak first:
-            // sendInitialConversationItem();
-        };
+            const handleSpeechStartedEvent = () => {
 
-        // Send initial conversation item if AI talks first
-        const sendInitialConversationItem = () => {
-            const initialConversationItem = {
-                type: 'conversation.item.create',
-                item: {
-                    type: 'message',
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'input_text',
-                            text: 'Greet the user with "Hello there! I am an AI voice assistant powered by Twilio and the OpenAI Realtime API. You can ask me for facts, jokes, or anything you can imagine. How can I help you?"'
-                        }
-                    ]
+                if (
+                    markQueue.length > 0 &&
+                    responseStartTimestampTwilio != null
+                ) {
+
+                    const elapsedTime =
+                        latestMediaTimestamp -
+                        responseStartTimestampTwilio;
+
+                    if (SHOW_TIMING_MATH) {
+                        console.log(
+                            `Elapsed time: ${elapsedTime}ms`
+                        );
+                    }
+
+                    if (lastAssistantItem) {
+
+                        const truncateEvent = {
+                            type: 'conversation.item.truncate',
+                            item_id: lastAssistantItem,
+                            content_index: 0,
+                            audio_end_ms: elapsedTime
+                        };
+
+                        openAiWs.send(
+                            JSON.stringify(truncateEvent)
+                        );
+                    }
+
+                    connection.send(
+                        JSON.stringify({
+                            event: 'clear',
+                            streamSid: streamSid
+                        })
+                    );
+
+                    markQueue = [];
+                    lastAssistantItem = null;
+                    responseStartTimestampTwilio = null;
                 }
             };
 
-            if (SHOW_TIMING_MATH) console.log('Sending initial conversation item:', JSON.stringify(initialConversationItem));
-            openAiWs.send(JSON.stringify(initialConversationItem));
-            openAiWs.send(JSON.stringify({ type: 'response.create' }));
-        };
+            // -------------------------------------------------
+            // TWILIO MARKS
+            // -------------------------------------------------
 
-        // Handle interruption when the caller's speech starts
-        const handleSpeechStartedEvent = () => {
-            if (markQueue.length > 0 && responseStartTimestampTwilio != null) {
-                const elapsedTime = latestMediaTimestamp - responseStartTimestampTwilio;
-                if (SHOW_TIMING_MATH) console.log(`Calculating elapsed time for truncation: ${latestMediaTimestamp} - ${responseStartTimestampTwilio} = ${elapsedTime}ms`);
+            const sendMark = (
+                connection,
+                streamSid
+            ) => {
 
-                if (lastAssistantItem) {
-                    const truncateEvent = {
-                        type: 'conversation.item.truncate',
-                        item_id: lastAssistantItem,
-                        content_index: 0,
-                        audio_end_ms: elapsedTime
-                    };
-                    if (SHOW_TIMING_MATH) console.log('Sending truncation event:', JSON.stringify(truncateEvent));
-                    openAiWs.send(JSON.stringify(truncateEvent));
-                }
+                if (!streamSid) return;
 
-                connection.send(JSON.stringify({
-                    event: 'clear',
-                    streamSid: streamSid
-                }));
-
-                // Reset
-                markQueue = [];
-                lastAssistantItem = null;
-                responseStartTimestampTwilio = null;
-            }
-        };
-
-        // Send mark messages to Media Streams so we know if and when AI response playback is finished
-        const sendMark = (connection, streamSid) => {
-            if (streamSid) {
                 const markEvent = {
                     event: 'mark',
+
                     streamSid: streamSid,
-                    mark: { name: 'responsePart' }
+
+                    mark: {
+                        name: 'responsePart'
+                    }
                 };
-                connection.send(JSON.stringify(markEvent));
+
+                connection.send(
+                    JSON.stringify(markEvent)
+                );
+
                 markQueue.push('responsePart');
-            }
-        };
+            };
 
-        // Open event for OpenAI WebSocket
-        openAiWs.on('open', () => {
-            console.log('Connected to the OpenAI Realtime API');
-            setTimeout(initializeSession, 100);
-        });
+            // -------------------------------------------------
+            // OPENAI CONNECTED
+            // -------------------------------------------------
 
-        // Listen for messages from the OpenAI WebSocket (and send to Twilio if necessary)
-        openAiWs.on('message', (data) => {
-            try {
-                const response = JSON.parse(data);
+            openAiWs.on('open', () => {
 
-                if (LOG_EVENT_TYPES.includes(response.type)) {
-                    console.log(`Received event: ${response.type}`, response);
-                }
+                console.log(
+                    'Connected to OpenAI Realtime API'
+                );
 
-                if (response.type === 'response.output_audio.delta' && response.delta) {
-                    const audioDelta = {
-                        event: 'media',
-                        streamSid: streamSid,
-                        media: { payload: response.delta }
-                    };
-                    connection.send(JSON.stringify(audioDelta));
+                setTimeout(
+                    initializeSession,
+                    100
+                );
+            });
 
-                    // First delta from a new response starts the elapsed time counter
-                    if (!responseStartTimestampTwilio) {
-                        responseStartTimestampTwilio = latestMediaTimestamp;
-                        if (SHOW_TIMING_MATH) console.log(`Setting start timestamp for new response: ${responseStartTimestampTwilio}ms`);
+            // -------------------------------------------------
+            // OPENAI EVENTS
+            // -------------------------------------------------
+
+            openAiWs.on('message', (data) => {
+
+                try {
+
+                    const response =
+                        JSON.parse(data);
+
+                    if (
+                        LOG_EVENT_TYPES.includes(
+                            response.type
+                        )
+                    ) {
+                        console.log(
+                            `Received event: ${response.type}`
+                        );
                     }
 
-                    if (response.item_id) {
-                        lastAssistantItem = response.item_id;
+                    // CUSTOMER TRANSCRIPT
+                    if (
+                        response.type ===
+                            'conversation.item.input_audio_transcription.completed' &&
+                        response.transcript
+                    ) {
+
+                        console.log(
+                            'Customer:',
+                            response.transcript
+                        );
+
+                        callTranscript.push(
+                            `Customer: ${response.transcript}`
+                        );
                     }
-                    
-                    sendMark(connection, streamSid);
-                }
 
-                if (response.type === 'input_audio_buffer.speech_started') {
-                    handleSpeechStartedEvent();
-                }
-            } catch (error) {
-                console.error('Error processing OpenAI message:', error, 'Raw message:', data);
-            }
-        });
+                    // CLAIRE TRANSCRIPT
+                    if (
+                        response.type ===
+                            'response.output_audio_transcript.done' &&
+                        response.transcript
+                    ) {
 
-        // Handle incoming messages from Twilio
-        connection.on('message', (message) => {
-            try {
-                const data = JSON.parse(message);
+                        console.log(
+                            'Claire:',
+                            response.transcript
+                        );
 
-                switch (data.event) {
-                    case 'media':
-                        latestMediaTimestamp = data.media.timestamp;
-                        if (SHOW_TIMING_MATH) console.log(`Received media message with timestamp: ${latestMediaTimestamp}ms`);
-                        if (openAiWs.readyState === WebSocket.OPEN) {
-                            const audioAppend = {
-                                type: 'input_audio_buffer.append',
-                                audio: data.media.payload
-                            };
-                            openAiWs.send(JSON.stringify(audioAppend));
+                        callTranscript.push(
+                            `Claire: ${response.transcript}`
+                        );
+                    }
+
+                    // CLAIRE AUDIO
+                    if (
+                        response.type ===
+                            'response.output_audio.delta' &&
+                        response.delta
+                    ) {
+
+                        const audioDelta = {
+                            event: 'media',
+
+                            streamSid: streamSid,
+
+                            media: {
+                                payload:
+                                    response.delta
+                            }
+                        };
+
+                        connection.send(
+                            JSON.stringify(
+                                audioDelta
+                            )
+                        );
+
+                        if (
+                            !responseStartTimestampTwilio
+                        ) {
+                            responseStartTimestampTwilio =
+                                latestMediaTimestamp;
                         }
-                        break;
-                    case 'start':
-                        streamSid = data.start.streamSid;
-                        console.log('Incoming stream has started', streamSid);
 
-                        // Reset start and media timestamp on a new stream
-                        responseStartTimestampTwilio = null; 
-                        latestMediaTimestamp = 0;
-                        break;
-                    case 'mark':
-                        if (markQueue.length > 0) {
-                            markQueue.shift();
+                        if (response.item_id) {
+                            lastAssistantItem =
+                                response.item_id;
                         }
-                        break;
-                    default:
-                        console.log('Received non-media event:', data.event);
-                        break;
+
+                        sendMark(
+                            connection,
+                            streamSid
+                        );
+                    }
+
+                    if (
+                        response.type ===
+                        'input_audio_buffer.speech_started'
+                    ) {
+                        handleSpeechStartedEvent();
+                    }
+
+                } catch (error) {
+
+                    console.error(
+                        'Error processing OpenAI message:',
+                        error
+                    );
                 }
-            } catch (error) {
-                console.error('Error parsing message:', error, 'Message:', message);
-            }
-        });
+            });
 
-        // Handle connection close
-        connection.on('close', () => {
-            if (openAiWs.readyState === WebSocket.OPEN) openAiWs.close();
-            console.log('Client disconnected.');
-        });
+            // -------------------------------------------------
+            // TWILIO EVENTS
+            // -------------------------------------------------
 
-        // Handle WebSocket close and errors
-        openAiWs.on('close', () => {
-            console.log('Disconnected from the OpenAI Realtime API');
-        });
+            connection.on(
+                'message',
+                (message) => {
 
-        openAiWs.on('error', (error) => {
-            console.error('Error in the OpenAI WebSocket:', error);
-        });
-    });
+                    try {
+
+                        const data =
+                            JSON.parse(message);
+
+                        switch (data.event) {
+
+                            case 'media':
+
+                                latestMediaTimestamp =
+                                    data.media.timestamp;
+
+                                if (
+                                    openAiWs.readyState ===
+                                    WebSocket.OPEN
+                                ) {
+
+                                    openAiWs.send(
+                                        JSON.stringify({
+                                            type:
+                                                'input_audio_buffer.append',
+
+                                            audio:
+                                                data.media.payload
+                                        })
+                                    );
+                                }
+
+                                break;
+
+                            case 'start':
+
+                                streamSid =
+                                    data.start.streamSid;
+
+                                callerNumber =
+                                    data.start
+                                        .customParameters
+                                        ?.callerNumber ||
+                                    null;
+
+                                console.log(
+                                    'Incoming stream started',
+                                    streamSid
+                                );
+
+                                console.log(
+                                    'Caller:',
+                                    callerNumber
+                                );
+
+                                responseStartTimestampTwilio =
+                                    null;
+
+                                latestMediaTimestamp =
+                                    0;
+
+                                break;
+
+                            case 'mark':
+
+                                if (
+                                    markQueue.length > 0
+                                ) {
+                                    markQueue.shift();
+                                }
+
+                                break;
+
+                            default:
+
+                                console.log(
+                                    'Received event:',
+                                    data.event
+                                );
+
+                                break;
+                        }
+
+                    } catch (error) {
+
+                        console.error(
+                            'Error parsing Twilio message:',
+                            error
+                        );
+                    }
+                }
+            );
+
+            // -------------------------------------------------
+            // CALL ENDS
+            // -------------------------------------------------
+
+            connection.on(
+                'close',
+                () => {
+
+                    console.log(
+                        'Customer disconnected.'
+                    );
+
+                    // Give OpenAI a moment to finish the final
+                    // transcription before sending the email.
+                    setTimeout(
+                        async () => {
+
+                            if (!emailSent) {
+
+                                emailSent = true;
+
+                                await sendAfterHoursEmail(
+                                    callTranscript,
+                                    callerNumber
+                                );
+                            }
+
+                            if (
+                                openAiWs.readyState ===
+                                WebSocket.OPEN
+                            ) {
+                                openAiWs.close();
+                            }
+
+                        },
+                        1500
+                    );
+                }
+            );
+
+            // -------------------------------------------------
+            // OPENAI CLOSE / ERROR
+            // -------------------------------------------------
+
+            openAiWs.on(
+                'close',
+                () => {
+                    console.log(
+                        'Disconnected from OpenAI Realtime API'
+                    );
+                }
+            );
+
+            openAiWs.on(
+                'error',
+                (error) => {
+                    console.error(
+                        'OpenAI WebSocket error:',
+                        error
+                    );
+                }
+            );
+        }
+    );
 });
 
-fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
-    if (err) {
-        console.error(err);
-        process.exit(1);
+// ---------------------------------------------------------
+// START SERVER - REQUIRED FOR RENDER
+// ---------------------------------------------------------
+
+fastify.listen(
+    {
+        port: PORT,
+        host: '0.0.0.0'
+    },
+    (err) => {
+
+        if (err) {
+            console.error(err);
+            process.exit(1);
+        }
+
+        console.log(
+            `Server is listening on port ${PORT}`
+        );
     }
-    console.log(`Server is listening on port ${PORT}`);
-});
+);
