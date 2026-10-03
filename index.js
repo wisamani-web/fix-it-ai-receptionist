@@ -53,7 +53,7 @@ Important rules:
 
 At the end, briefly repeat the customer's name, appliance, main issue, and callback number for confirmation. Then say that the Fix It office team will review the message and follow up when the office reopens.
 `;
-const VOICE = 'alloy';
+const VOICE = 'marin';
 const TEMPERATURE = 0.8; // Controls the randomness of the AI's responses
 const PORT = process.env.PORT || 5050; // Allow dynamic port assignment
 
