@@ -34,7 +34,7 @@ function getLastFour(phone) {
   return digits.length >= 4 ? digits.slice(-4) : null;
 }
 
-function buildClaireInstructions(callerNumber) {
+function buildWyslyInstructions(callerNumber) {
   const lastFour = getLastFour(callerNumber);
 
   const phoneRule = lastFour
@@ -43,9 +43,13 @@ function buildClaireInstructions(callerNumber) {
 
   return `
 # ROLE
-You are Claire, the after-hours receptionist for Fix It Appliance Service, a premium local in-home appliance repair company.
+You are Wysly, the after-hours receptionist for Fix It Appliance Service, a premium local in-home appliance repair company.
 Your goal is to make the caller feel genuinely cared for while collecting an accurate service request for the office.
 You are not a technician. Do not diagnose appliances.
+
+# NAME AND PRONUNCIATION
+Wysly is spelled W-Y-S-L-Y and is pronounced exactly like the English word "wisely."
+Always pronounce Wysly as "wisely."
 
 # VOICE AND MANNER
 Warm, friendly, calm, confident, patient, and natural.
@@ -120,7 +124,7 @@ Do not promise an appointment time, part availability, or warranty coverage.
 If the office must confirm something, say the office team will review it and follow up.
 
 # IF ASKED WHETHER YOU ARE AI
-Say naturally: "I'm Claire, Fix It's automated after-hours receptionist. I'm here to make sure our office gets everything they need to help you."
+Say naturally: "I'm Wysly, Fix It's automated after-hours receptionist. I'm here to make sure our office gets everything they need to help you."
 Do not announce this unless asked.
 
 # CLOSING
@@ -229,10 +233,10 @@ async function sendAfterHoursEmail(session, summary, transcript) {
         'Idempotency-Key': `fixit-after-hours-${session.callSid}`,
       },
       body: JSON.stringify({
-        from: 'Claire | Fix It After-Hours <onboarding@resend.dev>',
+        from: 'Wysly | Fix It Better <onboarding@resend.dev>',
         to: ['techniciansfixit@gmail.com'],
         subject: `New Fix It After-Hours Call - ${session.callerNumber || 'Unknown Caller'}`,
-        text: `FIX IT APPLIANCE SERVICE\nNEW AFTER-HOURS SERVICE REQUEST\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Claire\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
+        text: `FIX IT APPLIANCE SERVICE\nNEW AFTER-HOURS SERVICE REQUEST\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
       }),
     });
 
@@ -288,7 +292,7 @@ async function finishCall(callSid) {
 }
 
 fastify.get('/', async (_request, reply) => {
-  reply.send({ message: 'Fix It Claire GPT-Live receptionist is running!' });
+  reply.send({ message: 'Fix It Wysly GPT-Live receptionist is running!' });
 });
 
 fastify.all('/incoming-call', async (request, reply) => {
@@ -385,17 +389,13 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
         event_id: `start_${callSid || Date.now()}`,
         session: {
           model: 'gpt-live-1',
-          instructions: buildClaireInstructions(callerNumber),
+          instructions: buildWyslyInstructions(callerNumber),
           audio: {
             format: { type: 'audio/pcmu', rate: 8000 },
             output: { voice: 'gleam' },
           },
-          delegation: {
-    type: 'client'
-},
-
-store:
-    false
+          delegation: { type: 'client' },
+          store: false,
         },
       }));
     });
@@ -416,14 +416,14 @@ store:
             type: 'session.instructions.append',
             event_id: `greeting_${callSid || Date.now()}`,
             delegation_id: null,
-            content: 'Greet the caller now in English. Warmly say: "Thank you for calling Fix It Appliance Service. Our office is currently closed, but I can take care of your service request and make sure our team has everything they need to follow up with you. My name is Claire. May I start with your name?" Then pause and listen. Do not greet again, and do not ask for the name again if the caller clearly answers.',
+            content: 'Greet the caller now in English. Warmly say: "Thank you for calling Fix It Appliance Service. Our office is currently closed, but I can take care of your service request and make sure our team has everything they need to follow up with you. My name is Wysly. May I start with your name?" Then pause and listen. Do not greet again, and do not ask for the name again if the caller clearly answers.',
           }));
 
           return;
         }
 
         if (event.type === 'session.instructions.appended') {
-          console.log('Claire greeting instruction accepted.');
+          console.log('Wysly greeting instruction accepted.');
           return;
         }
 
@@ -444,7 +444,7 @@ store:
         }
 
         if (event.type === 'session.output_transcript.delta' && event.delta) {
-          recordTranscript(getSession(), 'Claire', event.delta, event.start_ms, event.end_ms);
+          recordTranscript(getSession(), 'Wysly', event.delta, event.start_ms, event.end_ms);
           return;
         }
 
@@ -547,5 +547,5 @@ fastify.listen({ port: PORT, host: '0.0.0.0' }, err => {
     process.exit(1);
   }
 
-  console.log(`Fix It Claire server listening on port ${PORT}`);
+  console.log(`Fix It Wysly server listening on port ${PORT}`);
 });
