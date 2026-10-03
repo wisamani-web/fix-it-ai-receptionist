@@ -390,8 +390,12 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
             format: { type: 'audio/pcmu', rate: 8000 },
             output: { voice: 'gleam' },
           },
-          delegation: null,
-          store: false,
+          delegation: {
+    type: 'client'
+},
+
+store:
+    false
         },
       }));
     });
