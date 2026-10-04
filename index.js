@@ -1610,7 +1610,7 @@ async function sendAfterHoursEmail(session, summary, transcript) {
       },
       body: JSON.stringify({
         from: 'Wysly | Fix It Better <onboarding@resend.dev>',
-        to: ['techniciansfixit@gmail.com'],
+        to: ['techniciansfixit@gmail.com', 'info@fixitapplianceservice.com'],
         subject: buildEmailSubject(summary, session.callerNumber),
         text: `FIX IT APPLIANCE SERVICE\nWYSLY AFTER-HOURS CALL REVIEW\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
       }),
