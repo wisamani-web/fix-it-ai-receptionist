@@ -28,6 +28,27 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const GRASSHOPPER_BUSINESS_NUMBERS = new Set([
+  '4405129091',
+  '8885129091',
+]);
+
+function normalizePhoneDigits(phone) {
+  if (!phone) return '';
+
+  let digits = String(phone).replace(/\D/g, '');
+
+  if (digits.length === 11 && digits.startsWith('1')) {
+    digits = digits.slice(1);
+  }
+
+  return digits;
+}
+
+function isGrasshopperBusinessCallerId(phone) {
+  return GRASSHOPPER_BUSINESS_NUMBERS.has(normalizePhoneDigits(phone));
+}
+
 function getLastFour(phone) {
   if (!phone || phone === 'Unknown') return null;
   const digits = String(phone).replace(/\D/g, '');
@@ -51,11 +72,30 @@ function formatCallerNumber(phone) {
 }
 
 function buildWyslyInstructions(callerNumber) {
-  const lastFour = getLastFour(callerNumber);
-  const fullCallerNumber = formatCallerNumber(callerNumber);
+  const grasshopperForwardedCall = isGrasshopperBusinessCallerId(callerNumber);
+  const lastFour = grasshopperForwardedCall ? null : getLastFour(callerNumber);
+  const fullCallerNumber = grasshopperForwardedCall ? null : formatCallerNumber(callerNumber);
 
-  const phoneRule = lastFour && fullCallerNumber
-    ? `Caller ID is available. The full incoming caller-ID number is ${fullCallerNumber}.
+  let phoneRule;
+
+  if (grasshopperForwardedCall) {
+    phoneRule = `This call was forwarded through Grasshopper. The incoming caller-ID value is Fix It Appliance Service's own business number, not the customer's original phone number.
+
+Do NOT use the incoming caller ID as the customer's callback number.
+Do NOT tell the customer that you have their phone number.
+Do NOT read 440-512-9091 or 888-512-9091 back as though it belongs to the customer.
+
+When callback information is needed, ask naturally:
+"What is the best phone number for our office to reach you?"
+
+After the customer gives the number, repeat it once for accuracy.
+
+If the customer asks what number you see from caller ID, explain briefly:
+"The call was forwarded through our phone system, so I don't have your original caller ID. What is the best number for our office to reach you?"
+
+Use the number the customer provides as the Best Callback Number.`;
+  } else if (lastFour && fullCallerNumber) {
+    phoneRule = `Caller ID is available. The full incoming caller-ID number is ${fullCallerNumber}.
 
 By default, do not read the entire number unless needed. When you reach callback-number confirmation, say naturally:
 "I have the number ending in ${lastFour}. Is that the best number for our office to reach you?"
@@ -64,8 +104,10 @@ If the customer specifically asks, "What full number do you have?" or asks you t
 
 Do not say that you cannot access the full number.
 
-If the customer says that is not the best callback number, ask for the preferred number and repeat it once for accuracy.`
-    : `Caller ID is unavailable or unreliable. Ask once for the best callback number and repeat it once for accuracy.`;
+If the customer says that is not the best callback number, ask for the preferred number and repeat it once for accuracy.`;
+  } else {
+    phoneRule = `Caller ID is unavailable or unreliable. Ask once for the best callback number and repeat it once for accuracy.`;
+  }
 
   return `
 # ROLE
@@ -1292,7 +1334,11 @@ Fixed company policies:
 - For a normal qualified scheduling lead, text permission should be explicitly captured as Yes or No.
 - Do not infer text permission from the existence of caller ID. It must be stated by the customer.
 
-Caller ID: ${session.callerNumber || 'Not available'}
+Caller ID: ${
+  isGrasshopperBusinessCallerId(session.callerNumber)
+    ? 'Grasshopper forwarded call — original customer caller ID not available'
+    : (session.callerNumber || 'Not available')
+}
 
 Transcript:
 ${transcript}
@@ -1376,6 +1422,8 @@ For Request Type choose one: Normal COD; Manufacturer warranty; Warranty company
 For Service Area Status choose one: Within normal area; Outside normal area; Office confirmation needed; Not applicable; Not provided.
 For Appliance Eligibility choose one: Supported; Unsupported; Needs clarification.
 For Brand Service Status choose one: Authorized service provider; Serviced, not authorized; Do not service; Needs office confirmation; Not provided.
+For Caller ID: if the system says this was a Grasshopper forwarded call and the original customer caller ID was unavailable, write exactly: Grasshopper forwarded call — original customer caller ID not available.
+For Best Callback Number: use the callback number the customer actually provided or confirmed during the conversation. Never use Fix It Appliance Service's own numbers 440-512-9091 or 888-512-9091 as the customer's callback number merely because they appeared as forwarded caller ID.
 For Model/Serial Photo Requested choose one: Yes; No; Not applicable.
 For Error Code Photo Requested choose one: Yes; No; Not applicable.
 For Washer Type choose one: Front load; Top load; Customer not sure; Not applicable; Not provided.
