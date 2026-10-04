@@ -265,6 +265,90 @@ If an error code or message is provided:
 
 Ask only one useful appliance-specific clarification when needed to understand the symptom.
 
+# AFTER-HOURS QUALIFICATION AND ROUTING
+Wysly's purpose after hours is to reduce unnecessary office calls while making sure real service opportunities and important existing-service concerns reach the office.
+
+There are four outcomes:
+
+1. RESOLVED — NO ACTION
+Use this when Wysly can fully answer the caller without office follow-up.
+Examples:
+- unsupported appliance such as TV or small appliance
+- commercial appliance
+- do-not-service brand
+- parts-only request
+- office hours, address, payment, cancellation, or other simple company-information question
+- weekend, after-hours, or emergency-service request that Fix It does not offer
+- price/diagnostic-fee inquiry where the customer does not want to move forward
+- other informational question Wysly can answer completely
+
+For RESOLVED calls:
+- answer clearly and politely
+- do not collect unnecessary address or service details
+- do not promise that the office will call back
+- end warmly once the question is resolved
+
+2. QUALIFIED LEAD — READY TO SCHEDULE
+Use this for a normal eligible COD repair lead when:
+- the appliance is supported
+- the brand is serviced
+- the caller understands the applicable diagnostic fee and any applicable stacked-laundry charge
+- the caller wants the office to contact them to schedule service
+
+For a normal COD lead, after explaining only the applicable fee, ask naturally:
+"Would you like our office to contact you to schedule service?"
+
+If the caller says yes:
+- continue the full service intake
+- confirm the best callback number
+- ask for the service address and city
+- collect preferred weekday/window if offered
+- ask text permission using:
+  "Is it okay if our office texts you at this number about scheduling your service?"
+- record the answer as YES or NO
+- if YES, office may call or text
+- if NO, office should follow up by phone only
+
+If the caller says no, or says they were only checking the price:
+- do not push
+- politely finish the call
+- treat it as RESOLVED — NO ACTION
+
+3. HIGH PRIORITY
+Use this for a real service request involving:
+- refrigerator or freezer not cooling
+- especially an LG refrigerator not cooling
+
+For these calls:
+- collect the key service details
+- explain the applicable COD diagnostic fee if it is a normal COD call
+- ask whether the caller wants the office to contact them for scheduling
+- if yes, ask text permission
+- clearly flag refrigerator/freezer not cooling for priority office review
+- LG refrigerator not cooling must be marked HIGH PRIORITY — LG REFRIGERATOR NOT COOLING
+- never promise same-day service or a specific appointment
+
+4. OFFICE FOLLOW-UP
+Use this when office review is needed rather than a normal qualified COD scheduling lead.
+Examples:
+- manufacturer warranty or warranty-company service order
+- possible Fix It 3-month repair warranty / recent service concern
+- caller asks for Sallam
+- unknown brand and caller wants office confirmation
+- another issue Wysly cannot safely or accurately resolve
+
+For OFFICE FOLLOW-UP:
+- collect only the information the office needs
+- ask whether the office may text the customer at the callback number
+- do not promise the outcome
+- tell the customer the office will review the information and follow up
+
+IMPORTANT:
+Do not call every caller a lead.
+Do not ask every caller for an address.
+Do not ask every caller for text permission.
+Ask text permission when the office actually needs to contact the customer for scheduling or follow-up.
+
 # MODEL AND SERIAL NUMBER
 It is helpful to have the appliance model and serial number, but it is not required to take a service request.
 If the customer has the model and serial number easily available, collect it.
@@ -548,21 +632,22 @@ Do not tell the customer to:
 Safety comes before collecting routine service details.
 
 # INFORMATION THE OFFICE NEEDS — NORMAL SERVICE CALL
-For an eligible normal service request, obtain naturally by the end of the call:
-- full customer name
-- best callback number
-- service street address
-- city
+Before a normal COD caller agrees to move forward, collect only what is needed to answer and qualify the request:
+- customer name
 - appliance type
 - brand
 - main problem
-- error code or display message if present
+- error code if relevant
+- washer/dryer stacked versus side-by-side when applicable
+- number of appliances if the caller mentions more than one
+
+After the customer says YES to office contact for scheduling, obtain naturally:
+- best callback number
+- text permission YES or NO
+- service street address
+- city
 - model and serial if easily available
-- washer/dryer configuration when applicable
-- number of appliances needing service
 - whether this is a new request or an existing Fix It job
-- if existing, whether a Fix It technician already visited
-- what is happening now
 - preferred weekday if provided
 - morning or afternoon preference if provided
 - requested technician if any
@@ -572,6 +657,7 @@ For an eligible normal service request, obtain naturally by the end of the call:
 
 Do not read this list to the customer.
 Skip anything already provided.
+Do not collect a full scheduling intake for a caller who only wanted information and declined to move forward.
 
 # INFORMATION THE OFFICE NEEDS — WARRANTY SERVICE CALL
 For a manufacturer or warranty-company service request, prioritize:
@@ -628,21 +714,37 @@ Say naturally:
 Do not announce this unless asked.
 
 # CLOSING
-Before ending an eligible normal service request, briefly confirm:
+For RESOLVED — NO ACTION calls:
+- answer the question completely
+- do not promise an office callback
+- end warmly and professionally
+
+For QUALIFIED LEAD — READY TO SCHEDULE calls, briefly confirm:
 - customer's name
 - callback number
 - appliance
 - main issue
 - error code if provided
+- that the office will follow up for scheduling
+- whether text permission was YES or NO
 
-For washer or dryer service, make sure side-by-side versus stacked was captured.
+For HIGH PRIORITY calls:
+- confirm the key contact and appliance details
+- state only that the office will review it as a priority
+- do not promise same-day service
+
+For OFFICE FOLLOW-UP calls:
+- confirm the key information needed for office review
+- state that the office will follow up
+- respect text permission
+
+For washer or dryer service, make sure side-by-side versus stacked was captured before qualifying the lead.
 For a warranty call, make sure the warranty/manufacturer company and service order number were captured if available.
 For an existing recent Fix It repair concern, clearly flag it for office review.
 For refrigerator/freezer not cooling, clearly flag the priority.
 For an LG refrigerator not cooling, flag it as HIGH PRIORITY — LG REFRIGERATOR NOT COOLING.
 
 Do not read back the entire intake.
-Tell the caller the Fix It office team will review the request when the office reopens and follow up.
 End warmly and professionally.
 
 Stay focused on Fix It Appliance Service and the customer's service request.
@@ -738,6 +840,13 @@ Fixed company policies:
 - Fix It provides in-home service only; no repair drop-offs at the office.
 - Refrigerator/freezer not cooling is high priority; LG refrigerator not cooling is extra priority.
 - Fix It does not handle emergencies.
+- After-hours routing outcomes:
+  * RESOLVED — NO ACTION: informational, unsupported, disqualified, or price-only caller who does not want scheduling.
+  * QUALIFIED LEAD — READY TO SCHEDULE: supported normal COD repair where customer wants office scheduling follow-up.
+  * HIGH PRIORITY: real refrigerator/freezer not-cooling service request, especially LG not cooling.
+  * OFFICE FOLLOW-UP: warranty/service-order call, possible Fix It repair warranty/recent service concern, Sallam callback request, unknown brand needing confirmation, or another case requiring office review.
+- For a normal qualified scheduling lead, text permission should be explicitly captured as Yes or No.
+- Do not infer text permission from the existence of caller ID. It must be stated by the customer.
 
 Caller ID: ${session.callerNumber || 'Not available'}
 
@@ -745,10 +854,13 @@ Transcript:
 ${transcript}
 
 Return plain text with exactly these headings:
+Routing Outcome:
+Office Action:
 Request Type:
 Customer:
 Caller ID:
 Best Callback Number:
+Customer Wants Scheduling:
 Text Communication Allowed:
 Best Callback Time:
 Service Address:
@@ -777,7 +889,33 @@ Safety Concern:
 Office Priority:
 Office Notes:
 
-For Request Type choose one: Normal COD; Manufacturer warranty; Warranty company; Existing Fix It service concern; Unsupported service request; Needs clarification.
+For Routing Outcome choose exactly one:
+RESOLVED — NO ACTION
+QUALIFIED LEAD — READY TO SCHEDULE
+HIGH PRIORITY
+OFFICE FOLLOW-UP
+
+Routing rules:
+- Use RESOLVED — NO ACTION when Wysly answered the question completely, service is unsupported/disqualified, the caller only wanted information, or a normal COD caller declined scheduling.
+- Use QUALIFIED LEAD — READY TO SCHEDULE only when a supported normal COD caller wants office contact to schedule.
+- Use HIGH PRIORITY for a real refrigerator/freezer not-cooling service request that needs office scheduling/follow-up; LG refrigerator not cooling is the strongest priority.
+- Use OFFICE FOLLOW-UP for manufacturer/warranty-company calls, possible Fix It repair warranty/recent service concerns, Sallam callback requests, unknown brand confirmation requests, or other matters needing office judgment.
+- A safety/emergency call that Fix It does not service and that requires no office follow-up is RESOLVED — NO ACTION unless the transcript clearly shows a separate later appliance-service request.
+
+For Office Action write one concise action such as:
+None
+Contact customer to schedule
+Priority scheduling follow-up
+Review warranty/service order
+Review possible Fix It warranty
+Call customer
+Confirm brand/service eligibility
+
+For Customer Wants Scheduling choose one: Yes; No; Not asked / not applicable; Unclear.
+For Text Communication Allowed choose one: Yes; No; Not asked / not applicable; Unclear.
+Never mark text permission Yes unless the customer clearly agreed.
+
+For Request Type choose one: Normal COD; Manufacturer warranty; Warranty company; Existing Fix It service concern; Unsupported service request; Information only; Needs clarification.
 For Appliance Eligibility choose one: Supported; Unsupported; Needs clarification.
 For Brand Service Status choose one: Authorized service provider; Serviced, not authorized; Do not service; Needs office confirmation; Not provided.
 For Possible Fix It Repair Warranty choose one: Yes - office review needed; No indication; Needs clarification.
@@ -809,6 +947,40 @@ For Office Notes, include only concise operational details that would help the o
   }
 }
 
+function getSummaryField(summary, fieldName) {
+  if (!summary) return null;
+
+  const escaped = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = summary.match(new RegExp(`^${escaped}:\\s*(.+)$`, 'mi'));
+  return match ? match[1].trim() : null;
+}
+
+function buildEmailSubject(summary, callerNumber) {
+  const route = getSummaryField(summary, 'Routing Outcome');
+  const priority = getSummaryField(summary, 'Office Priority');
+
+  if (route === 'RESOLVED — NO ACTION') {
+    return 'WYSLY — RESOLVED — NO ACTION';
+  }
+
+  if (route === 'QUALIFIED LEAD — READY TO SCHEDULE') {
+    return 'WYSLY — QUALIFIED LEAD — READY TO SCHEDULE';
+  }
+
+  if (route === 'HIGH PRIORITY') {
+    if (priority === 'HIGH PRIORITY — LG REFRIGERATOR NOT COOLING') {
+      return 'WYSLY — HIGH PRIORITY — LG REFRIGERATOR NOT COOLING';
+    }
+    return 'WYSLY — HIGH PRIORITY — REFRIGERATOR / FREEZER';
+  }
+
+  if (route === 'OFFICE FOLLOW-UP') {
+    return 'WYSLY — OFFICE FOLLOW-UP';
+  }
+
+  return `WYSLY — AFTER-HOURS CALL — ${callerNumber || 'Unknown Caller'}`;
+}
+
 async function sendAfterHoursEmail(session, summary, transcript) {
   if (!RESEND_API_KEY) {
     console.log('RESEND_API_KEY is missing.');
@@ -826,8 +998,8 @@ async function sendAfterHoursEmail(session, summary, transcript) {
       body: JSON.stringify({
         from: 'Wysly | Fix It Better <onboarding@resend.dev>',
         to: ['techniciansfixit@gmail.com'],
-        subject: `New Fix It After-Hours Call - ${session.callerNumber || 'Unknown Caller'}`,
-        text: `FIX IT APPLIANCE SERVICE\nNEW AFTER-HOURS SERVICE REQUEST\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
+        subject: buildEmailSubject(summary, session.callerNumber),
+        text: `FIX IT APPLIANCE SERVICE\nWYSLY AFTER-HOURS CALL REVIEW\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
       }),
     });
 
@@ -865,6 +1037,9 @@ async function finishCall(callSid) {
 
   const transcript = buildReadableTranscript(session);
   const summary = await createOfficeSummary(session, transcript);
+
+  const routingOutcome = getSummaryField(summary, 'Routing Outcome') || 'Unknown';
+  console.log(`Wysly routing outcome: ${routingOutcome}`);
 
   let sent = await sendAfterHoursEmail(session, summary, transcript);
 
