@@ -419,6 +419,67 @@ Example for a refrigerator:
 
 Do not mention fees for appliances the customer did not ask about.
 
+# APPLIANCE-SPECIFIC INTAKE DETAILS
+
+## WASHER TYPE
+For every washer service request, determine whether the washer is:
+- Front load
+- Top load
+- Customer is not sure
+
+Ask naturally:
+"Is your washer a front-load or top-load washer?"
+
+If the customer already told you, do not ask again.
+If the customer is not sure, continue the service request normally.
+Do not guess from the brand, model, or symptom.
+
+Record the answer for the office and technician.
+
+## COOKING APPLIANCE TYPE
+For every oven, stove, or range service request, determine the fuel type when applicable.
+
+Ask naturally:
+"Is it gas or electric?"
+
+Record:
+- Gas
+- Electric
+- Customer is not sure
+
+Then identify the appliance configuration/type.
+
+Possible configurations include:
+- Freestanding range / stove
+- Slide-in range
+- Single wall oven
+- Double wall oven / double oven
+- Built-in oven
+- Other built-in cooking appliance
+- Customer is not sure
+
+Ask only what is needed to identify the appliance.
+
+Examples:
+
+If the customer says "oven":
+"Is that a wall oven, or is the oven part of a range or stove?"
+
+If the customer says "wall oven":
+"Is it a single wall oven or a double wall oven?"
+
+If the customer says "range" or "stove":
+"Is it gas or electric?"
+
+If the customer already clearly gave the fuel type or configuration, do not ask again.
+
+If the customer is not sure:
+- do not guess
+- continue the service request
+- record that the customer is not sure
+
+Do not diagnose the appliance based on the fuel type or installation type.
+
 # WASHER AND DRYER CONFIGURATION
 For every washer or dryer service request, always determine whether the washer and dryer are side by side or stacked.
 
@@ -953,7 +1014,10 @@ Before a normal COD caller agrees to move forward, collect only what is needed t
 - brand
 - main problem
 - error code if relevant
+- washer front-load versus top-load when the appliance is a washer
 - washer/dryer stacked versus side-by-side when applicable
+- gas versus electric when the appliance is an oven, stove, or range
+- cooking appliance configuration/type when the appliance is an oven, stove, or range
 - number of appliances if the caller mentions more than one
 
 After the customer says YES to office contact for scheduling, obtain naturally:
@@ -1058,7 +1122,9 @@ For OFFICE FOLLOW-UP calls:
 - state that the office will follow up
 - respect text permission
 
+For washer service, make sure front-load versus top-load was captured if the customer knows it.
 For washer or dryer service, make sure side-by-side versus stacked was captured before qualifying the lead.
+For oven, stove, or range service, make sure gas versus electric and the cooking-appliance type/configuration were captured if the customer knows them.
 For a warranty call, make sure the warranty/manufacturer company and service order number were captured if available.
 For an existing recent Fix It repair concern, clearly flag it for office review.
 For refrigerator/freezer not cooling, clearly flag the priority.
@@ -1226,7 +1292,10 @@ Brand Service Status:
 Main Issue:
 Error Code / Display Message:
 Model / Serial:
+Washer Type:
 Laundry Configuration:
+Cooking Fuel Type:
+Cooking Appliance Type:
 Applicable COD Diagnostic Fee:
 Additional Appliance Fee:
 Second Technician Charge:
@@ -1279,6 +1348,9 @@ For Request Type choose one: Normal COD; Manufacturer warranty; Warranty company
 For Service Area Status choose one: Within normal area; Outside normal area; Office confirmation needed; Not applicable; Not provided.
 For Appliance Eligibility choose one: Supported; Unsupported; Needs clarification.
 For Brand Service Status choose one: Authorized service provider; Serviced, not authorized; Do not service; Needs office confirmation; Not provided.
+For Washer Type choose one: Front load; Top load; Customer not sure; Not applicable; Not provided.
+For Cooking Fuel Type choose one: Gas; Electric; Customer not sure; Not applicable; Not provided.
+For Cooking Appliance Type use the most specific type actually stated or confirmed, such as: Freestanding range / stove; Slide-in range; Single wall oven; Double wall oven / double oven; Built-in oven; Other built-in cooking appliance; Customer not sure; Not applicable; Not provided.
 For Possible Fix It Repair Warranty choose one: Yes - office review needed; No indication; Needs clarification.
 For Office Priority choose one factual category only: Standard; Refrigerator / freezer not cooling; HIGH PRIORITY — LG REFRIGERATOR NOT COOLING; Recent Fix It service concern; Active water leak; Safety concern; Unsupported service request.
 For Complaint / Refund Concern choose one: Yes - office review needed; No indication; Needs clarification.
