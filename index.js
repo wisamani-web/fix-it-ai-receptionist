@@ -1714,6 +1714,15 @@ Speak English unless the caller explicitly asks to switch languages.
 `;
 }
 
+function buildWyslyBackendBootstrapInstructions() {
+  return `
+You are the private Fix It policy backend for Wysly.
+The full policy manual will be loaded immediately after the live session starts.
+Until then, do not invent company policy, pricing, warranty rules, service-area rules, or scheduling facts.
+If delegated before the full policy is loaded, return only: "Policy is still loading; ask one brief clarification or wait a moment."
+`;
+}
+
 function buildWyslyBackendInstructions(callerNumber) {
   return `
 You are the PRIVATE policy and workflow backend for Wysly, the live voice receptionist for Fix It Appliance Service.
@@ -2114,7 +2123,7 @@ async function finishCall(callSid) {
 }
 
 fastify.get('/', async (_request, reply) => {
-  reply.send({ message: 'Fix It Wysly Natural v16 receptionist is running!' });
+  reply.send({ message: 'Fix It Wysly Natural v17 fast-start receptionist is running!' });
 });
 
 fastify.all('/incoming-call', async (request, reply) => {
@@ -2168,7 +2177,18 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
   let liveWs = null;
   let liveStarted = false;
   let liveClosing = false;
+  let backendPolicyReady = false;
+  let firstOutputAudioLogged = false;
   const pendingAudio = [];
+
+  const latency = {
+    mediaConnectedAt: Date.now(),
+    twilioStartAt: null,
+    liveSocketOpenAt: null,
+    liveSessionStartedAt: null,
+    greetingInstructionSentAt: null,
+    firstOutputAudioAt: null,
+  };
 
   const getSession = () => {
     if (callSid && callSessions.has(callSid)) return callSessions.get(callSid);
@@ -2204,7 +2224,11 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
     });
 
     liveWs.on('open', () => {
+      latency.liveSocketOpenAt = Date.now();
       console.log('Connected to GPT-Live.');
+      if (latency.twilioStartAt) {
+        console.log(`LATENCY: GPT-Live socket opened ${latency.liveSocketOpenAt - latency.twilioStartAt} ms after Twilio stream start.`);
+      }
 
       liveWs.send(JSON.stringify({
         type: 'session.start',
@@ -2220,8 +2244,8 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
             type: 'responses',
             responses: {
               model: 'gpt-6-luna',
-              instructions: buildWyslyBackendInstructions(callerNumber),
-              max_output_tokens: 350,
+              instructions: buildWyslyBackendBootstrapInstructions(),
+              max_output_tokens: 250,
               reasoning: { effort: 'low' },
             },
           },
@@ -2236,24 +2260,65 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
 
         if (event.type === 'session.started') {
           liveStarted = true;
+          latency.liveSessionStartedAt = Date.now();
           console.log('GPT-Live session started.');
 
-          for (const audio of pendingAudio.splice(0)) {
-            liveWs.send(JSON.stringify({ type: 'session.input_audio.append', audio }));
+          if (latency.twilioStartAt) {
+            console.log(`LATENCY: GPT-Live session started ${latency.liveSessionStartedAt - latency.twilioStartAt} ms after Twilio stream start.`);
           }
+
+          // IMPORTANT FOR FAST GREETING:
+          // Do not replay pre-session buffered audio before the greeting.
+          // That audio is usually silence / transfer noise and can push the
+          // greeting later on the live-session timeline.
+          const droppedFrames = pendingAudio.length;
+          pendingAudio.length = 0;
+          if (droppedFrames) {
+            console.log(`FAST GREETING: discarded ${droppedFrames} buffered pre-session audio frames.`);
+          }
+
+          latency.greetingInstructionSentAt = Date.now();
 
           liveWs.send(JSON.stringify({
             type: 'session.instructions.append',
             event_id: `greeting_${callSid || Date.now()}`,
             delegation_id: null,
-            content: 'Greet the caller now in English. Say exactly: "Thank you for calling Fix It Appliance Service. This is Wysly. How can I help you?" Then stop talking and listen naturally. Do not add another sentence, do not ask for a name yet, and do not greet again.',
+            content: 'Greet the caller immediately in English. Say exactly: "Thank you for calling Fix It Appliance Service. This is Wysly. How can I help you?" Begin speaking now, then stop and listen naturally. Do not add another sentence, do not ask for a name yet, and do not greet again.',
           }));
+
+          console.log('FAST GREETING: greeting instruction sent immediately.');
+
+          // Load the large Fix It policy AFTER the live voice session is ready.
+          // This keeps the 80k+ policy manual from blocking the caller's greeting.
+          setTimeout(() => {
+            if (!liveWs || liveWs.readyState !== WebSocket.OPEN || liveClosing) return;
+
+            liveWs.send(JSON.stringify({
+              type: 'session.update',
+              event_id: `backend_policy_${callSid || Date.now()}`,
+              session: {
+                delegation: {
+                  responses: {
+                    instructions: buildWyslyBackendInstructions(callerNumber),
+                  },
+                },
+              },
+            }));
+
+            console.log('BACKGROUND: full Fix It backend policy update sent.');
+          }, 100);
 
           return;
         }
 
         if (event.type === 'session.instructions.appended') {
           console.log('Wysly greeting instruction accepted.');
+          return;
+        }
+
+        if (event.type === 'session.updated') {
+          backendPolicyReady = true;
+          console.log('BACKGROUND: full Fix It backend policy is ready.');
           return;
         }
 
@@ -2269,6 +2334,19 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
         }
 
         if (event.type === 'session.output_audio.delta' && event.delta) {
+          if (!firstOutputAudioLogged) {
+            firstOutputAudioLogged = true;
+            latency.firstOutputAudioAt = Date.now();
+
+            if (latency.twilioStartAt) {
+              console.log(`LATENCY: first Wysly audio ${latency.firstOutputAudioAt - latency.twilioStartAt} ms after Twilio stream start.`);
+            }
+
+            if (latency.greetingInstructionSentAt) {
+              console.log(`LATENCY: first Wysly audio ${latency.firstOutputAudioAt - latency.greetingInstructionSentAt} ms after greeting instruction.`);
+            }
+          }
+
           if (streamSid && connection.readyState === WebSocket.OPEN) {
             connection.send(JSON.stringify({
               event: 'media',
@@ -2324,11 +2402,13 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
           break;
 
         case 'start':
+          latency.twilioStartAt = Date.now();
           streamSid = data.start.streamSid;
           callSid = data.start.customParameters?.callSid || data.start.callSid || null;
           callerNumber = data.start.customParameters?.callerNumber || null;
 
           console.log('Twilio stream started:', streamSid);
+          console.log(`LATENCY: Twilio stream start ${latency.twilioStartAt - latency.mediaConnectedAt} ms after media WebSocket connected.`);
           console.log('CallSid:', callSid);
           console.log('Caller:', callerNumber);
 
