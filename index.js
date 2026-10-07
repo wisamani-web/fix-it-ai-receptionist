@@ -17,6 +17,19 @@ const WYSLY_EMAIL_TO = (process.env.WYSLY_EMAIL_TO || 'techniciansfixit@gmail.co
 const WYSLY_EMAIL_FROM = process.env.WYSLY_EMAIL_FROM || 'onboarding@resend.dev';
 const BACKEND_TIMEOUT_MS = Number(process.env.WYSLY_BACKEND_TIMEOUT_MS || 4500);
 
+const WYSLY_TIMEZONE = process.env.WYSLY_TIMEZONE || 'America/New_York';
+const WYSLY_BUSINESS_START = process.env.WYSLY_BUSINESS_START || '08:00';
+const WYSLY_BUSINESS_END = process.env.WYSLY_BUSINESS_END || '18:00';
+
+// Sallam's current daytime office number. Keep this configurable in Render.
+const WYSLY_TRANSFER_NUMBER = process.env.WYSLY_TRANSFER_NUMBER || '+14407832103';
+const WYSLY_TRANSFER_TIMEOUT_SECONDS = Number(
+  process.env.WYSLY_TRANSFER_TIMEOUT_SECONDS || 15
+);
+
+// auto = normal Mon-Fri business hours; daytime / after_hours are useful for testing.
+const WYSLY_FORCE_MODE = String(process.env.WYSLY_FORCE_MODE || 'auto').toLowerCase();
+
 if (!OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY.');
   process.exit(1);
@@ -62,6 +75,75 @@ function getLastFour(phone) {
   if (!phone || phone === 'Unknown') return null;
   const digits = String(phone).replace(/\D/g, '');
   return digits.length >= 4 ? digits.slice(-4) : null;
+}
+
+function parseClockToMinutes(value, fallbackMinutes) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return fallbackMinutes;
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return fallbackMinutes;
+  }
+
+  return hour * 60 + minute;
+}
+
+function getEasternBusinessClock(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: WYSLY_TIMEZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+
+  return {
+    weekday: values.weekday,
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+  };
+}
+
+function isRegularBusinessHours(date = new Date()) {
+  if (WYSLY_FORCE_MODE === 'daytime') return true;
+  if (WYSLY_FORCE_MODE === 'after_hours') return false;
+
+  const { weekday, hour, minute } = getEasternBusinessClock(date);
+
+  if (!['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday)) {
+    return false;
+  }
+
+  const nowMinutes = hour * 60 + minute;
+  const startMinutes = parseClockToMinutes(WYSLY_BUSINESS_START, 8 * 60);
+  const endMinutes = parseClockToMinutes(WYSLY_BUSINESS_END, 18 * 60);
+
+  return nowMinutes >= startMinutes && nowMinutes < endMinutes;
+}
+
+function getCallMode(date = new Date()) {
+  return isRegularBusinessHours(date) ? 'daytime' : 'after_hours';
+}
+
+function xmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function formatCallerNumber(phone) {
@@ -141,9 +223,58 @@ function buildCallerIdLiveRule(callerNumber) {
   return `Caller ID is unavailable. When a callback number is needed, ask for it and repeat the full number once for accuracy.`;
 }
 
-function buildWyslyLiveInstructions(callerNumber) {
+function buildWyslyLiveInstructions(session, phase = 'initial') {
+  const callerNumber = session?.callerNumber;
+  const mode = session?.mode || 'after_hours';
+  const priorTranscript =
+    phase === 'resume_after_transfer'
+      ? buildReadableTranscript(session).slice(-6000)
+      : '';
+
+  const modeInstructions =
+    mode === 'daytime'
+      ? `
+DAYTIME ROLE
+- You answer EVERY call first and protect the office from unnecessary calls.
+- Resolve unsupported appliances, unsupported brands, simple price questions, service-area questions, spam, sales, and information-only calls yourself whenever possible.
+- Do NOT transfer a caller merely because they ask for a human.
+- A normal COD service caller should be transferred to Sallam only after the backend confirms they are QUALIFIED:
+  1) supported appliance,
+  2) serviced brand,
+  3) approved service area,
+  4) regular COD vs warranty is known,
+  5) applicable diagnostic fee has been explained,
+  6) customer accepts the diagnostic fee,
+  7) customer genuinely wants service.
+- Manufacturer/third-party warranty calls, existing Fix It service concerns, complaints/refund concerns, or another legitimate office-judgment matter may be transferred after basic identification/context is collected; normal COD fee acceptance is not required for those workflows.
+- BEFORE telling a caller that you will transfer them, delegate to the backend and wait for the backend transfer decision.
+- If the backend confirms TRANSFER_TO_SALLAM, say exactly: "Absolutely. I'll connect you with our office now." Then stop speaking and allow the application to transfer the call.
+`
+      : `
+AFTER-HOURS ROLE
+- Do not live-transfer calls.
+- Resolve unsupported/informational calls yourself.
+- For a valid service request, collect the complete intake needed for office follow-up.
+- Never imply that a technician is being dispatched after hours.
+- Tell qualified callers that the office will follow up for scheduling.
+`;
+
+  const resumeInstructions =
+    phase === 'resume_after_transfer'
+      ? `
+RESUME AFTER UNSUCCESSFUL OFFICE TRANSFER
+This is the SAME caller and SAME call. The office did not answer the live transfer.
+Your first words now must be exactly:
+"It looks like our office is assisting another customer right now. I can take the rest of your information and make sure they follow up with you."
+Then continue the intake using everything already known. Do NOT ask the caller to repeat information already provided.
+
+PRIOR SAME-CALL TRANSCRIPT:
+${priorTranscript}
+`
+      : '';
+
   return `
-You are Wysly, the after-hours receptionist for Fix It Appliance Service. Wysly is pronounced exactly like "wisely."
+You are Wysly, the receptionist for Fix It Appliance Service. Wysly is pronounced exactly like "wisely."
 
 VOICE EXPERIENCE
 - Sound warm, calm, confident, premium, natural, and concise.
@@ -154,27 +285,41 @@ VOICE EXPERIENCE
 - Never say "perfect" or "great" after a customer describes a problem.
 - Stay in English unless the caller explicitly asks to switch.
 - Do not diagnose, troubleshoot, tell the caller to reset something, or guess parts.
+${modeInstructions}
 
 OPENING
-Your first spoken words must be:
+${
+  phase === 'initial'
+    ? `Your first spoken words must be:
 "Thank you for calling Fix It Appliance Service. This is Wysly. How can I help you?"
-Do not ask for the customer's name until you understand why they are calling.
+Do not ask for the customer's name until you understand why they are calling.`
+    : `Do not give the original greeting again. Follow the resume-after-transfer instruction above.`
+}
 
 BACKEND DELEGATION
-You have a backend business brain. Use it whenever you need:
+You have a backend business controller. Use it whenever you need:
 - any Fix It company fact or policy
 - appliance or brand eligibility
 - authorization status
 - diagnostic fees or charges
-- warranty workflow
+- COD vs warranty workflow
 - service-area decisions
 - scheduling rules
 - priority/routing decisions
+- whether a daytime caller is qualified for live transfer
 - the correct next intake question
 - any answer you are not completely certain about
 
-IMPORTANT: Never say "let me check", "I'm checking", "one moment while I look", "let me look that up", or anything similar.
-When you delegate, do not announce that you are checking. A brief natural acknowledgment such as "Absolutely" or "I understand" is okay, then wait for the backend result.
+IMPORTANT
+Never say:
+- "let me check"
+- "I'm checking"
+- "one moment while I look"
+- "let me look that up"
+- "hold on while I check"
+or anything similar.
+
+When you delegate, do NOT announce that you are checking. A brief natural acknowledgment such as "Absolutely" or "I understand" is okay, then wait for the backend result.
 If the backend cannot provide a verified answer, say you do not want to guess and offer office follow-up.
 
 CRITICAL RELIABILITY
@@ -182,13 +327,15 @@ CRITICAL RELIABILITY
 - Never claim you checked a live schedule, map, inventory, manufacturer system, claim system, or other system unless a verified backend result explicitly says it was checked.
 - There is currently NO live scheduling access.
 - Never promise same-day service.
-- Remember everything the caller already said. Never ask the same question twice unless clarification is genuinely needed.
+- Remember everything the caller already said.
+- Never ask the same question twice unless clarification is genuinely needed.
 - If the caller corrects something, use the newest value and stop using the old one.
+- Do not tell the customer a live transfer is happening until the backend explicitly confirms TRANSFER_TO_SALLAM.
 
 NAME
 For a real service request or office follow-up, ask:
 "May I have your first and last name?"
-If they give two name words, treat them as first and last name. Do not ask for the first name again.
+If they give two name words, treat them as first and last name. Do not ask the first name again.
 Do not add Mr., Mrs., Ms., Dr., Sir, or Ma'am unless clearly preferred.
 
 PHONE
@@ -216,21 +363,71 @@ If no:
 Never use time-of-day closings such as "good night" or "have a good morning."
 
 ${buildCallerIdLiveRule(callerNumber)}
+${resumeInstructions}
 `.trim();
 }
 
-function buildWyslyBackendInstructions(callerNumber) {
+function buildWyslyBackendInstructions(session) {
+  const callerNumber = session?.callerNumber;
+  const mode = session?.mode || 'after_hours';
   const callerRule = isGrasshopperBusinessCallerId(callerNumber)
     ? `Grasshopper replaced the original caller ID with Fix It's own number. Never use 440-512-9091 or 888-512-9091 as the customer's callback number unless the customer explicitly gives that number.`
     : `Caller ID, if present, may be used only after appropriate confirmation.`;
 
   return `
-You are the private business-policy and workflow backend for Wysly, the live after-hours receptionist for Fix It Appliance Service.
+You are the private business-policy and workflow controller for Wysly, the live receptionist for Fix It Appliance Service.
+
+CURRENT CALL MODE: ${mode === 'daytime' ? 'DAYTIME — LIVE OFFICE TRANSFER AVAILABLE' : 'AFTER HOURS — NO LIVE TRANSFER'}
 
 VOICE CONVERSATION CONTEXT
 The transcript may contain fragments, transcription errors, interruptions, or later corrections. Prefer the newest confirmed information. Do not invent missing details. Your job is to return concise, VERIFIED guidance to Wysly: answer the current customer question when possible, state the applicable company rule, and give the single best next question/action. Do not write long scripts.
 
 NEVER tell Wysly to say "let me check", "I'm checking", or similar. There is no live schedule, map, inventory, manufacturer portal, or claim lookup connected. If something cannot be verified from these rules, direct Wysly to say she does not want to guess and offer office follow-up.
+
+DAYTIME GATEKEEPER / TRANSFER POLICY
+During DAYTIME, Wysly answers every call first and should resolve/filter calls that do not need the office.
+
+For a NORMAL COD call, return action TRANSFER_TO_SALLAM only when the transcript clearly establishes ALL of the following:
+1. Supported residential appliance.
+2. Brand is serviced by Fix It.
+3. Service city/ZIP is approved.
+4. Caller confirmed it is a regular customer-pay/COD request, not warranty.
+5. Correct diagnostic fee was explained.
+6. Caller explicitly accepted/understood the diagnostic fee and still wants service.
+7. Caller wants to proceed with scheduling/service.
+
+If any one of those items is missing, do NOT transfer yet. Give Wysly the next single question needed to complete qualification.
+
+For manufacturer/third-party warranty:
+- Do not require COD diagnostic-fee acceptance.
+- Confirm it is a legitimate supported brand/appliance/location and collect enough basic context to identify the customer/request.
+- During DAYTIME, a valid warranty/service-order call may transfer to Sallam.
+
+For an existing Fix It service concern, possible Fix It warranty, complaint/refund concern, or a legitimate office-judgment issue:
+- During DAYTIME, collect the caller's name and concise reason first.
+- Then the call may transfer to Sallam.
+
+Never transfer:
+- TV/small appliance/unsupported equipment
+- do-not-service brand
+- commercial appliance
+- obvious sales/marketing/spam/job-seeker/wrong-number call
+- price-only caller who does not want service
+- normal COD caller who has not accepted the applicable diagnostic fee
+- normal COD caller outside/uncertain service area until office-review workflow is appropriate
+
+During AFTER HOURS:
+- Never return TRANSFER_TO_SALLAM.
+- Resolve simple/unsupported calls or collect the full intake for office follow-up.
+
+When action is TRANSFER_TO_SALLAM, Wysly's only spoken sentence should be:
+"Absolutely. I'll connect you with our office now."
+
+If a prior daytime transfer failed and the call resumed with Wysly:
+- do not attempt another transfer in the same call
+- collect the remaining intake
+- tell the customer the office will follow up
+
 
 COMPANY
 - Fix It Appliance Service. Slogan: Fix It Better.
@@ -513,16 +710,135 @@ function getFastPolicyGuidance(session) {
   return null;
 }
 
-async function runWyslyBackend(session) {
-  const transcript = buildReadableTranscript(session);
-  const fastGuidance = getFastPolicyGuidance(session);
+function controllerDecision({
+  spokenGuidance,
+  action = 'continue',
+  routing = 'OFFICE FOLLOW-UP',
+  qualified = false,
+  reason = '',
+}) {
+  return {
+    spoken_guidance: String(spokenGuidance || '').trim(),
+    action,
+    routing,
+    qualified: Boolean(qualified),
+    reason: String(reason || '').trim(),
+  };
+}
 
-  if (fastGuidance) {
-    return fastGuidance;
+function getFastPolicyDecision(session) {
+  const latest = getLatestCustomerText(session);
+  if (!latest) return null;
+
+  const lower = latest.toLowerCase();
+  const mode = session?.mode || 'after_hours';
+
+  // No fake lookup for common manufacturer/warranty calls.
+  if (
+    /\b(lg|samsung|ge|frigidaire|electrolux|midea|sharp)\b/.test(lower) &&
+    /\b(warranty|service order|claim)\b/.test(lower)
+  ) {
+    return controllerDecision({
+      spokenGuidance:
+        `This is a manufacturer/warranty workflow. Fix It is authorized for the named authorized brand. Do not quote the normal COD diagnostic fee. Ask for the customer's first and last name if not already known, then continue collecting the warranty/service-order basics. ${
+          mode === 'daytime'
+            ? 'Once the supported warranty request is identified and basic caller/context information is collected, it may be transferred to Sallam.'
+            : 'After hours, collect the full intake for office follow-up.'
+        }`,
+      action: 'continue',
+      routing: 'OFFICE FOLLOW-UP',
+      qualified: false,
+      reason: 'Recognized manufacturer/warranty workflow.',
+    });
+  }
+
+  // Deterministic service-area answers.
+  if (/\b(do you service|service|come to|go to|cover)\b/.test(lower)) {
+    for (const city of APPROVED_SERVICE_AREAS) {
+      if (lower.includes(city.toLowerCase())) {
+        return controllerDecision({
+          spokenGuidance: `Yes. Fix It Appliance Service services ${city}. Answer yes directly. Do not say you are checking.`,
+          action: 'continue',
+          routing: 'RESOLVED — NO ACTION',
+          qualified: false,
+          reason: 'Approved service city.',
+        });
+      }
+    }
+
+    const zipMatch = latest.match(/\b\d{5}\b/);
+    if (zipMatch && APPROVED_SERVICE_ZIPS.has(zipMatch[0])) {
+      return controllerDecision({
+        spokenGuidance: `Yes. ZIP code ${zipMatch[0]} is an approved Fix It service area. Answer yes directly. Do not say you are checking.`,
+        action: 'continue',
+        routing: 'RESOLVED — NO ACTION',
+        qualified: false,
+        reason: 'Approved service ZIP.',
+      });
+    }
+  }
+
+  // Deterministic do-not-service brand answers.
+  for (const brand of DO_NOT_SERVICE_BRANDS) {
+    if (lower.includes(brand.toLowerCase())) {
+      return controllerDecision({
+        spokenGuidance: `Fix It does not currently service ${brand}. Say so politely. Do not transfer this call unless the caller also has another supported service request.`,
+        action: 'continue',
+        routing: 'RESOLVED — NO ACTION',
+        qualified: false,
+        reason: 'Do-not-service brand.',
+      });
+    }
+  }
+
+  return null;
+}
+
+async function runWyslyController(session) {
+  const transcript = buildReadableTranscript(session);
+  const fastDecision = getFastPolicyDecision(session);
+
+  if (fastDecision) {
+    return fastDecision;
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
+
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      spoken_guidance: { type: 'string' },
+      action: {
+        type: 'string',
+        enum: [
+          'continue',
+          'transfer_to_sallam',
+          'resolve_no_action',
+          'collect_full_intake',
+        ],
+      },
+      routing: {
+        type: 'string',
+        enum: [
+          'RESOLVED — NO ACTION',
+          'QUALIFIED LEAD — READY TO SCHEDULE',
+          'HIGH PRIORITY',
+          'OFFICE FOLLOW-UP',
+        ],
+      },
+      qualified: { type: 'boolean' },
+      reason: { type: 'string' },
+    },
+    required: [
+      'spoken_guidance',
+      'action',
+      'routing',
+      'qualified',
+      'reason',
+    ],
+  };
 
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -535,36 +851,72 @@ async function runWyslyBackend(session) {
       body: JSON.stringify({
         model: WYSLY_BACKEND_MODEL,
         store: false,
-        instructions: buildWyslyBackendInstructions(session?.callerNumber),
-        input: `Current live call transcript:\n\n${transcript}\n\nReturn verified guidance for Wysly's next spoken response. Focus on the customer's latest request and the single best next step.`,
+        instructions: buildWyslyBackendInstructions(session),
+        input: `Current live call transcript:
+
+${transcript}
+
+Application state:
+Call mode: ${session?.mode || 'after_hours'}
+Previous live-transfer attempts: ${session?.transferAttempts || 0}
+Previous transfer result: ${session?.transferResult || 'none'}
+
+Return the verified controller decision for Wysly's NEXT response.
+If the call is daytime and is truly ready for Sallam under the transfer policy, use action "transfer_to_sallam".
+If the call already resumed after an unsuccessful transfer, never use transfer_to_sallam again.`,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'wysly_controller_decision',
+            strict: true,
+            schema,
+          },
+        },
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Wysly backend error:', response.status, data);
+      console.error('Wysly controller error:', response.status, data);
       return null;
     }
 
-    const direct = String(data.output_text || '').trim();
-    if (direct) return direct;
+    const raw = String(data.output_text || '').trim();
 
-    const pieces = [];
-    for (const item of data.output || []) {
-      for (const content of item.content || []) {
-        if (typeof content.text === 'string') pieces.push(content.text);
-        if (typeof content.output_text === 'string') pieces.push(content.output_text);
-      }
+    if (!raw) {
+      console.error('Wysly controller returned no output_text.');
+      return null;
     }
 
-    return pieces.join('\n').trim() || null;
+    const decision = JSON.parse(raw);
+
+    // Hard application-level transfer guard.
+    if (
+      decision.action === 'transfer_to_sallam' &&
+      (
+        session?.mode !== 'daytime' ||
+        (session?.transferAttempts || 0) > 0
+      )
+    ) {
+      return controllerDecision({
+        spokenGuidance:
+          `Do not live-transfer this call. Continue collecting the intake and tell the customer the office will follow up.`,
+        action: 'collect_full_intake',
+        routing: decision.routing || 'OFFICE FOLLOW-UP',
+        qualified: false,
+        reason: 'Transfer blocked by application state.',
+      });
+    }
+
+    return decision;
   } catch (error) {
     if (error?.name === 'AbortError') {
-      console.error(`Wysly backend timed out after ${BACKEND_TIMEOUT_MS}ms.`);
+      console.error(`Wysly controller timed out after ${BACKEND_TIMEOUT_MS}ms.`);
     } else {
-      console.error('Wysly backend request error:', error);
+      console.error('Wysly controller request error:', error);
     }
+
     return null;
   } finally {
     clearTimeout(timeout);
@@ -632,7 +984,7 @@ async function createOfficeSummary(session, transcript) {
       body: JSON.stringify({
         model: WYSLY_BACKEND_MODEL,
         store: false,
-        input: `Prepare a concise internal after-hours service request summary for Fix It Appliance Service.
+        input: `Prepare a concise internal call summary for Fix It Appliance Service.
 
 Use only facts actually stated in the transcript or caller ID, plus the fixed company policies below when classifying eligibility, fees, priority, or workflow.
 Do not diagnose.
@@ -678,7 +1030,8 @@ Fixed company policies:
 - Wysly must never invent holiday hours.
 - Wysly is a receptionist and must not diagnose or provide troubleshooting/reset instructions.
 - After-hours requests must not imply a technician is being dispatched after hours.
-- After-hours routing outcomes:
+- During business hours, Wysly may filter calls and transfer qualified or legitimate office-judgment calls to Sallam.
+- Routing outcomes:
   * RESOLVED — NO ACTION: informational, unsupported, disqualified, or price-only caller who does not want scheduling.
   * QUALIFIED LEAD — READY TO SCHEDULE: supported normal COD repair where customer wants office scheduling follow-up.
   * HIGH PRIORITY: real refrigerator/freezer not-cooling service request, especially LG not cooling.
@@ -691,6 +1044,9 @@ Caller ID: ${
     ? 'Grasshopper forwarded call — original customer caller ID not available'
     : (session.callerNumber || 'Not available')
 }
+Call Mode: ${session.mode || 'after_hours'}
+Transfer Attempts: ${session.transferAttempts || 0}
+Transfer Result: ${session.transferResult || 'Not attempted'}
 
 Transcript:
 ${transcript}
@@ -826,7 +1182,11 @@ function getSummaryField(summary, fieldName) {
   return match ? match[1].trim() : null;
 }
 
-function buildEmailSubject(summary, callerNumber) {
+function buildEmailSubject(summary, callerNumber, session) {
+  if (session?.transferResult === 'completed' || session?.officeAnswered) {
+    return 'WYSLY — TRANSFERRED TO OFFICE';
+  }
+
   const route = getSummaryField(summary, 'Routing Outcome');
   const priority = getSummaryField(summary, 'Office Priority');
 
@@ -869,8 +1229,8 @@ async function sendAfterHoursEmail(session, summary, transcript) {
       body: JSON.stringify({
         from: `Wysly | Fix It Better <${WYSLY_EMAIL_FROM}>`,
         to: WYSLY_EMAIL_TO,
-        subject: buildEmailSubject(summary, session.callerNumber),
-        text: `FIX IT APPLIANCE SERVICE\nWYSLY AFTER-HOURS CALL REVIEW\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAfter-Hours Receptionist\n`,
+        subject: buildEmailSubject(summary, session.callerNumber, session),
+        text: `FIX IT APPLIANCE SERVICE\nWYSLY CALL REVIEW\n\n========================================\nSERVICE REQUEST SUMMARY\n========================================\n\n${summary}\n\n========================================\nFULL CALL TRANSCRIPT\n========================================\n\n${transcript}\n\n========================================\n\nCall SID: ${session.callSid}\n\nAutomatically prepared by Wysly\nFix It Appliance Service\nAI Receptionist\n`,
       }),
     });
 
@@ -902,7 +1262,7 @@ async function finishCall(callSid) {
   if (session.emailSent || session.finishing) return;
   session.finishing = true;
 
-  console.log(`Preparing after-hours request for ${callSid}`);
+  console.log(`Preparing Wysly call review for ${callSid}`);
 
   await delay(3000);
 
@@ -941,42 +1301,215 @@ fastify.get('/healthz', async (_request, reply) => {
     ok: true,
     service: 'wysly-production',
     activeCalls: callSessions.size,
+    callModeNow: getCallMode(),
+    transferNumberConfigured: Boolean(WYSLY_TRANSFER_NUMBER),
     timestamp: new Date().toISOString(),
   });
 });
+
+function createNewCallSession(callSid, callerNumber) {
+  const mode = getCallMode();
+
+  const session = {
+    callSid,
+    callerNumber,
+    mode,
+    startedAt: Date.now(),
+    transcriptEvents: [],
+    transcriptSequence: 0,
+    emailSent: false,
+    finishing: false,
+    pendingAction: null,
+    transferInProgress: false,
+    transferAttempts: 0,
+    transferResult: null,
+    officeAccepted: false,
+    officeAnswered: false,
+    resumeAfterTransfer: false,
+    recoveryCount: 0,
+  };
+
+  callSessions.set(callSid, session);
+  return session;
+}
+
+function buildWyslyStreamTwiML(host, session, phase = 'initial') {
+  const callerNumber = xmlEscape(session.callerNumber || 'Unknown');
+  const callSid = xmlEscape(session.callSid);
+  const mode = xmlEscape(session.mode);
+  const safePhase = xmlEscape(phase);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect action="https://${host}/after-wysly-stream" method="POST">
+    <Stream url="wss://${host}/media-stream">
+      <Parameter name="callerNumber" value="${callerNumber}" />
+      <Parameter name="callSid" value="${callSid}" />
+      <Parameter name="mode" value="${mode}" />
+      <Parameter name="phase" value="${safePhase}" />
+    </Stream>
+  </Connect>
+</Response>`;
+}
 
 fastify.all('/incoming-call', async (request, reply) => {
   const callerNumber = request.body?.From || request.query?.From || 'Unknown';
   const callSid = request.body?.CallSid || request.query?.CallSid || `unknown-${Date.now()}`;
 
-  callSessions.set(callSid, {
-    callSid,
-    callerNumber,
-    transcriptEvents: [],
-    transcriptSequence: 0,
-    emailSent: false,
-    finishing: false,
-  });
+  const session = createNewCallSession(callSid, callerNumber);
 
   console.log(`Incoming call ${callSid} from ${callerNumber}`);
+  console.log(`Wysly call mode: ${session.mode}`);
 
-  // Production optimization: begin opening GPT-Live immediately while Twilio
-  // is still processing the TwiML and opening the media stream.
-  ensureLiveBridge(callSid, callerNumber);
+  // Pre-warm GPT-Live immediately while Twilio is still opening the media stream.
+  ensureLiveBridge(callSid, callerNumber, 'initial');
 
   const host = request.headers.host;
+  reply.type('text/xml').send(buildWyslyStreamTwiML(host, session, 'initial'));
+});
 
+fastify.all('/after-wysly-stream', async (request, reply) => {
+  const callSid = request.body?.CallSid || request.query?.CallSid;
+  const session = callSessions.get(callSid);
+  const host = request.headers.host;
+
+  console.log('Twilio /after-wysly-stream callback:', callSid, session?.pendingAction);
+
+  if (
+    session &&
+    session.mode === 'daytime' &&
+    session.pendingAction === 'transfer_to_sallam'
+  ) {
+    session.pendingAction = null;
+    session.transferInProgress = false;
+    session.transferAttempts += 1;
+
+    const number = xmlEscape(WYSLY_TRANSFER_NUMBER);
+
+    session.officeAccepted = false;
+
+    const parentSid = encodeURIComponent(session.callSid);
+
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Dial answerOnBridge="true" timeout="${WYSLY_TRANSFER_TIMEOUT_SECONDS}" action="https://${host}/transfer-result" method="POST">
+    <Number url="https://${host}/office-screen?parentCallSid=${parentSid}" method="POST">${number}</Number>
+  </Dial>
+</Response>`;
+
+    reply.type('text/xml').send(twiml);
+    return;
+  }
+
+  // If the stream ended unexpectedly while the caller is still present,
+  // do not trap the caller in a loop. Finish safely.
+  if (callSid) finishCall(callSid);
+
+  reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
+</Response>`);
+});
+
+fastify.all('/office-screen', async (request, reply) => {
+  const parentCallSid =
+    request.query?.parentCallSid ||
+    request.body?.ParentCallSid ||
+    request.query?.ParentCallSid;
+
+  const host = request.headers.host;
+  const encodedParent = encodeURIComponent(parentCallSid || '');
+
+  // This is heard only by Sallam. The customer continues to hear ringing
+  // because <Dial answerOnBridge="true"> is enabled.
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Connect action="https://${host}/call-ended" method="POST">
-    <Stream url="wss://${host}/media-stream">
-      <Parameter name="callerNumber" value="${callerNumber}" />
-      <Parameter name="callSid" value="${callSid}" />
-    </Stream>
-  </Connect>
+  <Gather input="dtmf" numDigits="1" timeout="4" actionOnEmptyResult="true" action="https://${host}/office-screen-result?parentCallSid=${encodedParent}" method="POST">
+    <Say>Qualified Fix It customer from Wysly. Press 1 to accept the call.</Say>
+  </Gather>
+  <Hangup/>
 </Response>`;
 
   reply.type('text/xml').send(twiml);
+});
+
+fastify.all('/office-screen-result', async (request, reply) => {
+  const parentCallSid =
+    request.query?.parentCallSid ||
+    request.body?.ParentCallSid ||
+    request.query?.ParentCallSid;
+
+  const digits =
+    request.body?.Digits ||
+    request.query?.Digits ||
+    '';
+
+  const session = callSessions.get(parentCallSid);
+
+  if (digits === '1' && session) {
+    session.officeAccepted = true;
+    console.log(`Sallam accepted Wysly transfer for ${parentCallSid}.`);
+
+    // Ending the screening TwiML normally allows Twilio to bridge the two legs.
+    reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Connecting now.</Say>
+</Response>`);
+    return;
+  }
+
+  console.log(`Sallam did not accept Wysly transfer for ${parentCallSid}.`);
+
+  reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
+</Response>`);
+});
+
+fastify.all('/transfer-result', async (request, reply) => {
+  const callSid = request.body?.CallSid || request.query?.CallSid;
+  const dialStatus =
+    request.body?.DialCallStatus ||
+    request.query?.DialCallStatus ||
+    'unknown';
+
+  const session = callSessions.get(callSid);
+  const host = request.headers.host;
+
+  console.log(`Transfer result for ${callSid}: ${dialStatus}`);
+
+  if (!session) {
+    reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Hangup/></Response>`);
+    return;
+  }
+
+  session.transferResult = dialStatus;
+
+  if (
+    session.officeAccepted &&
+    (dialStatus === 'completed' || dialStatus === 'answered')
+  ) {
+    session.officeAnswered = true;
+    finishCall(callSid);
+
+    reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Hangup/></Response>`);
+    return;
+  }
+
+  // Sallam was busy / unavailable / did not answer.
+  // Resume with Wysly on the SAME call and keep the earlier transcript.
+  session.resumeAfterTransfer = true;
+  session.pendingAction = null;
+  session.transferInProgress = false;
+
+  liveBridges.delete(callSid);
+  ensureLiveBridge(callSid, session.callerNumber, 'resume_after_transfer');
+
+  reply
+    .type('text/xml')
+    .send(buildWyslyStreamTwiML(host, session, 'resume_after_transfer'));
 });
 
 fastify.all('/call-ended', async (request, reply) => {
@@ -1019,75 +1552,270 @@ function sendAudioToTwilio(bridge, payload) {
   }
 }
 
+function shouldSuppressFinish(session) {
+  return Boolean(
+    session?.transferInProgress ||
+    session?.pendingAction === 'transfer_to_sallam'
+  );
+}
+
+function clearBridgeTimers(bridge) {
+  if (!bridge) return;
+
+  if (bridge.silenceGuardTimer) {
+    clearTimeout(bridge.silenceGuardTimer);
+    bridge.silenceGuardTimer = null;
+  }
+
+  if (bridge.transferTimer) {
+    clearInterval(bridge.transferTimer);
+    bridge.transferTimer = null;
+  }
+}
+
+function scheduleDeadAirGuard(bridge) {
+  if (!bridge) return;
+
+  if (bridge.silenceGuardTimer) {
+    clearTimeout(bridge.silenceGuardTimer);
+  }
+
+  const customerActivityAt = Date.now();
+
+  bridge.silenceGuardTimer = setTimeout(() => {
+    const session = callSessions.get(bridge.callSid);
+
+    if (
+      !session ||
+      bridge.activeDelegations.size > 0 ||
+      bridge.transferArmed ||
+      bridge.liveWs?.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    const lastAssistant = bridge.lastAssistantAudioAt || 0;
+
+    if (lastAssistant > customerActivityAt) {
+      return;
+    }
+
+    console.warn(`Dead-air guard activated for ${bridge.callSid}.`);
+
+    sendLiveEvent(bridge, {
+      type: 'session.instructions.append',
+      event_id: `dead_air_${Date.now()}`,
+      delegation_id: null,
+      content:
+        `Respond now. Do not say you were checking or mention a delay. If the caller's latest request cannot be verified, say: "I don't want to give you the wrong information. I can take your details and have our office follow up." Then continue with one short question.`,
+    });
+  }, 5000);
+}
+
+function transitionToOfficeTransfer(bridge) {
+  if (!bridge || bridge.transferExecuted) return;
+
+  const session = callSessions.get(bridge.callSid);
+
+  if (
+    !session ||
+    session.mode !== 'daytime' ||
+    (session.transferAttempts || 0) > 0
+  ) {
+    return;
+  }
+
+  bridge.transferExecuted = true;
+  session.pendingAction = 'transfer_to_sallam';
+  session.transferInProgress = true;
+
+  console.log(`Transitioning ${bridge.callSid} from Wysly to Sallam.`);
+
+  clearBridgeTimers(bridge);
+
+  // Close the Twilio media WebSocket. Twilio then continues the <Connect>
+  // action and /after-wysly-stream performs the <Dial>.
+  try {
+    if (bridge.twilioConnection?.readyState === WebSocket.OPEN) {
+      bridge.twilioConnection.close();
+    }
+  } catch (error) {
+    console.error('Unable to close Twilio stream for transfer:', error);
+  }
+
+  try {
+    if (bridge.liveWs?.readyState === WebSocket.OPEN) {
+      bridge.liveWs.close();
+    }
+  } catch (error) {
+    console.error('Unable to close GPT-Live stream for transfer:', error);
+  }
+}
+
+function armTransferAfterWyslyPhrase(bridge) {
+  if (!bridge || bridge.transferArmed) return;
+
+  bridge.transferArmed = true;
+  bridge.transferArmedAt = Date.now();
+  bridge.transferAudioStarted = false;
+
+  sendLiveEvent(bridge, {
+    type: 'session.instructions.append',
+    event_id: `transfer_phrase_${Date.now()}`,
+    delegation_id: null,
+    content:
+      `Say exactly: "Absolutely. I'll connect you with our office now." Do not ask another question and do not add anything after that sentence.`,
+  });
+
+  bridge.transferTimer = setInterval(() => {
+    const elapsed = Date.now() - bridge.transferArmedAt;
+    const sinceAudio = Date.now() - (bridge.lastAssistantAudioAt || 0);
+
+    if (
+      bridge.transferAudioStarted &&
+      elapsed >= 1300 &&
+      sinceAudio >= 700
+    ) {
+      clearInterval(bridge.transferTimer);
+      bridge.transferTimer = null;
+      transitionToOfficeTransfer(bridge);
+      return;
+    }
+
+    // Hard ceiling so the call can never hang while attempting transfer.
+    if (elapsed >= 5000) {
+      clearInterval(bridge.transferTimer);
+      bridge.transferTimer = null;
+      transitionToOfficeTransfer(bridge);
+    }
+  }, 150);
+}
+
 async function handleClientDelegation(bridge, delegationId) {
-  if (!bridge || !delegationId || bridge.activeDelegations.has(delegationId)) return;
+  if (!bridge || !delegationId || bridge.activeDelegations.has(delegationId)) {
+    return;
+  }
 
   bridge.activeDelegations.add(delegationId);
   const session = callSessions.get(bridge.callSid);
 
   try {
-    const guidance = await runWyslyBackend(session);
+    const decision = await runWyslyController(session);
 
-    const content = safeCommentaryText(
-      guidance ||
-      `The requested information could not be verified quickly. Do not guess and do not say you are checking. Tell the caller: "I don't want to give you the wrong information. I can note that for our office to follow up with you." Then continue by collecting only the information needed for office follow-up.`
-    );
-
-    if (bridge.liveWs?.readyState === WebSocket.OPEN) {
-      sendLiveEvent(bridge, {
-        type: 'session.commentary.append',
-        event_id: `backend_${Date.now()}`,
-        delegation_id: delegationId,
-        content,
-      });
-    }
-  } catch (error) {
-    console.error('Client delegation handler error:', error);
-
-    if (bridge.liveWs?.readyState === WebSocket.OPEN) {
+    if (!decision) {
       sendLiveEvent(bridge, {
         type: 'session.commentary.append',
         event_id: `backend_fallback_${Date.now()}`,
         delegation_id: delegationId,
-        content: `Do not guess and do not say you are checking. Tell the caller: "I don't want to give you the wrong information. I can note that for our office to follow up with you."`,
+        content:
+          `Do not guess and do not say you are checking. Say: "I don't want to give you the wrong information. I can take your details and have our office follow up." Then ask the single next question needed for office follow-up.`,
       });
+      return;
     }
+
+    console.log(
+      `Wysly controller decision for ${bridge.callSid}:`,
+      decision.action,
+      decision.routing,
+      decision.reason
+    );
+
+    if (
+      decision.action === 'transfer_to_sallam' &&
+      session?.mode === 'daytime' &&
+      (session?.transferAttempts || 0) === 0
+    ) {
+      session.lastControllerRouting = decision.routing;
+      session.lastControllerReason = decision.reason;
+
+      // Resolve the delegation quietly, then separately control the exact
+      // transfer sentence so the transfer timing is deterministic.
+      sendLiveEvent(bridge, {
+        type: 'session.thinking.append',
+        event_id: `backend_transfer_ok_${Date.now()}`,
+        delegation_id: delegationId,
+        content:
+          `Verified: this call is qualified for live transfer to Sallam now. Do not ask another question.`,
+      });
+
+      armTransferAfterWyslyPhrase(bridge);
+      return;
+    }
+
+    const content = safeCommentaryText(
+      decision.spoken_guidance ||
+      `Continue naturally with the single next question needed. Do not say you are checking.`
+    );
+
+    sendLiveEvent(bridge, {
+      type: 'session.commentary.append',
+      event_id: `backend_${Date.now()}`,
+      delegation_id: delegationId,
+      content,
+    });
+  } catch (error) {
+    console.error('Client delegation handler error:', error);
+
+    sendLiveEvent(bridge, {
+      type: 'session.commentary.append',
+      event_id: `backend_exception_${Date.now()}`,
+      delegation_id: delegationId,
+      content:
+        `Do not guess and do not say you are checking. Say: "I don't want to give you the wrong information. I can take your details and have our office follow up."`,
+    });
   } finally {
     bridge.activeDelegations.delete(delegationId);
   }
 }
 
-function closeLiveBridge(bridge) {
+function closeLiveBridge(bridge, { finish = true } = {}) {
   if (!bridge || bridge.liveClosing) return;
   bridge.liveClosing = true;
+  clearBridgeTimers(bridge);
 
-  if (bridge.liveStarted && bridge.liveWs?.readyState === WebSocket.OPEN) {
-    try {
-      sendLiveEvent(bridge, {
-        type: 'session.close',
-        event_id: `close_${bridge.callSid || Date.now()}`,
-      });
-    } catch (error) {
-      console.error('Unable to request GPT-Live close:', error);
+  try {
+    if (bridge.liveWs?.readyState === WebSocket.OPEN) {
+      bridge.liveWs.close();
     }
+  } catch (error) {
+    console.error('Unable to close GPT-Live WebSocket:', error);
+  }
 
-    setTimeout(() => {
-      if (bridge.liveWs?.readyState === WebSocket.OPEN) {
-        bridge.liveWs.close();
-      }
-    }, 5000);
-  } else if (bridge.liveWs?.readyState === WebSocket.OPEN) {
-    bridge.liveWs.close();
+  if (finish) {
+    const session = callSessions.get(bridge.callSid);
+    if (!shouldSuppressFinish(session)) {
+      finishCall(bridge.callSid);
+    }
   }
 }
 
-function createLiveBridge(callSid, callerNumber) {
+function createLiveBridge(callSid, callerNumber, phase = 'initial') {
   const existing = liveBridges.get(callSid);
-  if (existing) return existing;
+
+  if (
+    existing &&
+    !existing.liveClosing &&
+    existing.phase === phase
+  ) {
+    return existing;
+  }
+
+  if (existing) {
+    clearBridgeTimers(existing);
+    try {
+      if (existing.liveWs?.readyState === WebSocket.OPEN) {
+        existing.liveWs.close();
+      }
+    } catch {}
+    liveBridges.delete(callSid);
+  }
+
+  const session = callSessions.get(callSid);
 
   const bridge = {
     callSid,
     callerNumber,
+    phase,
     liveWs: null,
     liveStarted: false,
     liveClosing: false,
@@ -1098,7 +1826,14 @@ function createLiveBridge(callSid, callerNumber) {
     activeDelegations: new Set(),
     greetingRequested: false,
     firstAudioAt: null,
+    lastAssistantAudioAt: null,
     createdAt: Date.now(),
+    silenceGuardTimer: null,
+    transferTimer: null,
+    transferArmed: false,
+    transferArmedAt: null,
+    transferAudioStarted: false,
+    transferExecuted: false,
   };
 
   liveBridges.set(callSid, bridge);
@@ -1112,14 +1847,14 @@ function createLiveBridge(callSid, callerNumber) {
   bridge.liveWs = liveWs;
 
   liveWs.on('open', () => {
-    console.log(`Connected to GPT-Live for ${callSid}.`);
+    console.log(`Connected to GPT-Live for ${callSid} (${phase}).`);
 
     sendLiveEvent(bridge, {
       type: 'session.start',
-      event_id: `start_${callSid || Date.now()}`,
+      event_id: `start_${callSid}_${Date.now()}`,
       session: {
         model: 'gpt-live-1',
-        instructions: buildWyslyLiveInstructions(callerNumber),
+        instructions: buildWyslyLiveInstructions(session, phase),
         audio: {
           format: { type: 'audio/pcmu', rate: 8000 },
           output: { voice: WYSLY_VOICE },
@@ -1136,23 +1871,31 @@ function createLiveBridge(callSid, callerNumber) {
 
       if (event.type === 'session.started') {
         bridge.liveStarted = true;
-        console.log(`GPT-Live session started for ${callSid} in ${Date.now() - bridge.createdAt}ms.`);
 
-        // Ask for the greeting immediately. Do this before sending any buffered
-        // transfer audio so hold music/background noise cannot delay the opening.
+        console.log(
+          `GPT-Live session started for ${callSid} (${phase}) in ${
+            Date.now() - bridge.createdAt
+          }ms.`
+        );
+
         if (!bridge.greetingRequested) {
           bridge.greetingRequested = true;
 
+          const content =
+            phase === 'resume_after_transfer'
+              ? `Speak immediately now. Say exactly: "It looks like our office is assisting another customer right now. I can take the rest of your information and make sure they follow up with you." Then continue naturally from the prior call context and do not ask for information already provided.`
+              : `Speak immediately now. Your exact first sentence is: "Thank you for calling Fix It Appliance Service. This is Wysly. How can I help you?" Then stop and listen. Do not add anything before it.`;
+
           sendLiveEvent(bridge, {
             type: 'session.instructions.append',
-            event_id: `greeting_${callSid || Date.now()}`,
+            event_id: `greeting_${callSid}_${Date.now()}`,
             delegation_id: null,
-            content: `Speak immediately now. Your exact first sentence is: "Thank you for calling Fix It Appliance Service. This is Wysly. How can I help you?" Then stop and listen. Do not add anything before it.`,
+            content,
           });
         }
 
-        // Most buffered audio before Live startup is transfer silence/music.
-        // Drop it instead of letting it compete with the greeting.
+        // Audio that arrived before GPT-Live startup is commonly Grasshopper
+        // transfer music/silence. Drop it so it cannot delay the greeting.
         bridge.pendingInputAudio.length = 0;
         return;
       }
@@ -1165,21 +1908,48 @@ function createLiveBridge(callSid, callerNumber) {
       }
 
       if (event.type === 'session.output_audio.delta' && event.delta) {
+        const now = Date.now();
+
         if (!bridge.firstAudioAt) {
-          bridge.firstAudioAt = Date.now();
-          console.log(`First Wysly audio for ${callSid}: ${bridge.firstAudioAt - bridge.createdAt}ms from bridge creation.`);
+          bridge.firstAudioAt = now;
+          console.log(
+            `First Wysly audio for ${callSid}: ${
+              bridge.firstAudioAt - bridge.createdAt
+            }ms from bridge creation.`
+          );
         }
+
+        bridge.lastAssistantAudioAt = now;
+
+        if (bridge.transferArmed) {
+          bridge.transferAudioStarted = true;
+        }
+
         sendAudioToTwilio(bridge, event.delta);
         return;
       }
 
       if (event.type === 'session.input_transcript.delta' && event.delta) {
-        recordTranscript(callSessions.get(callSid), 'Customer', event.delta, event.start_ms, event.end_ms);
+        recordTranscript(
+          callSessions.get(callSid),
+          'Customer',
+          event.delta,
+          event.start_ms,
+          event.end_ms
+        );
+
+        scheduleDeadAirGuard(bridge);
         return;
       }
 
       if (event.type === 'session.output_transcript.delta' && event.delta) {
-        recordTranscript(callSessions.get(callSid), 'Wysly', event.delta, event.start_ms, event.end_ms);
+        recordTranscript(
+          callSessions.get(callSid),
+          'Wysly',
+          event.delta,
+          event.start_ms,
+          event.end_ms
+        );
         return;
       }
 
@@ -1194,22 +1964,31 @@ function createLiveBridge(callSid, callerNumber) {
       if (event.type === 'error') {
         console.error('GPT-Live error:', JSON.stringify(event));
 
-        // Prevent dead air after a recoverable model error.
-        if (bridge.liveStarted && bridge.liveWs?.readyState === WebSocket.OPEN) {
+        if (
+          bridge.liveStarted &&
+          bridge.liveWs?.readyState === WebSocket.OPEN &&
+          !bridge.transferArmed
+        ) {
           sendLiveEvent(bridge, {
             type: 'session.instructions.append',
             event_id: `recover_${Date.now()}`,
             delegation_id: null,
-            content: `Recover immediately. Do not mention a technical problem. If you cannot verify the caller's last request, say: "I don't want to give you the wrong information. I can note that for our office to follow up with you." Then continue naturally.`,
+            content:
+              `Recover immediately. Do not mention a technical problem. Do not say you were checking. If you cannot verify the caller's latest request, say: "I don't want to give you the wrong information. I can take your details and have our office follow up." Then continue naturally.`,
           });
         }
         return;
       }
 
       if (event.type === 'session.closed') {
-        console.log(`GPT-Live session closed for ${callSid}.`);
-        if (liveWs.readyState === WebSocket.OPEN) liveWs.close();
-        finishCall(callSid);
+        console.log(`GPT-Live session closed for ${callSid} (${phase}).`);
+        clearBridgeTimers(bridge);
+
+        const currentSession = callSessions.get(callSid);
+
+        if (!shouldSuppressFinish(currentSession)) {
+          finishCall(callSid);
+        }
       }
     } catch (error) {
       console.error('GPT-Live event processing error:', error);
@@ -1221,16 +2000,35 @@ function createLiveBridge(callSid, callerNumber) {
   });
 
   liveWs.on('close', () => {
-    console.log(`GPT-Live WebSocket disconnected for ${callSid}.`);
-    if (callSid) finishCall(callSid);
-    setTimeout(() => liveBridges.delete(callSid), 60000);
+    console.log(`GPT-Live WebSocket disconnected for ${callSid} (${phase}).`);
+    clearBridgeTimers(bridge);
+
+    const currentSession = callSessions.get(callSid);
+
+    if (!shouldSuppressFinish(currentSession)) {
+      finishCall(callSid);
+    }
+
+    if (liveBridges.get(callSid) === bridge) {
+      liveBridges.delete(callSid);
+    }
   });
 
   return bridge;
 }
 
-function ensureLiveBridge(callSid, callerNumber) {
-  return liveBridges.get(callSid) || createLiveBridge(callSid, callerNumber);
+function ensureLiveBridge(callSid, callerNumber, phase = 'initial') {
+  const existing = liveBridges.get(callSid);
+
+  if (
+    existing &&
+    !existing.liveClosing &&
+    existing.phase === phase
+  ) {
+    return existing;
+  }
+
+  return createLiveBridge(callSid, callerNumber, phase);
 }
 
 fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
@@ -1249,30 +2047,30 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
 
         case 'start': {
           const streamSid = data.start.streamSid;
-          const callSid = data.start.customParameters?.callSid || data.start.callSid || null;
-          const callerNumber = data.start.customParameters?.callerNumber || null;
+          const callSid =
+            data.start.customParameters?.callSid ||
+            data.start.callSid ||
+            null;
+          const callerNumber =
+            data.start.customParameters?.callerNumber ||
+            null;
+          const phase =
+            data.start.customParameters?.phase ||
+            'initial';
 
           console.log('Twilio stream started:', streamSid);
           console.log('CallSid:', callSid);
           console.log('Caller:', callerNumber);
+          console.log('Phase:', phase);
 
           if (callSid && !callSessions.has(callSid)) {
-            callSessions.set(callSid, {
-              callSid,
-              callerNumber,
-              transcriptEvents: [],
-              transcriptSequence: 0,
-              emailSent: false,
-              finishing: false,
-            });
+            createNewCallSession(callSid, callerNumber);
           }
 
-          bridge = ensureLiveBridge(callSid, callerNumber);
+          bridge = ensureLiveBridge(callSid, callerNumber, phase);
           bridge.twilioConnection = connection;
           bridge.streamSid = streamSid;
 
-          // If Wysly started speaking during the short Twilio stream setup,
-          // flush that already-generated greeting audio immediately.
           for (const audio of bridge.pendingOutputAudio.splice(0)) {
             sendAudioToTwilio(bridge, audio);
           }
@@ -1283,7 +2081,10 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
         case 'media':
           if (!bridge) return;
 
-          if (bridge.liveStarted && bridge.liveWs?.readyState === WebSocket.OPEN) {
+          if (
+            bridge.liveStarted &&
+            bridge.liveWs?.readyState === WebSocket.OPEN
+          ) {
             sendLiveEvent(bridge, {
               type: 'session.input_audio.append',
               audio: data.media.payload,
@@ -1293,15 +2094,25 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
           }
           break;
 
-        case 'stop':
+        case 'stop': {
           console.log('Twilio stream stopped.');
+
           if (bridge) {
             bridge.twilioConnection = null;
             bridge.streamSid = null;
-            closeLiveBridge(bridge);
-            finishCall(bridge.callSid);
+
+            const session = callSessions.get(bridge.callSid);
+
+            // During intentional daytime transfer, the parent call continues
+            // into <Dial>. Do not finalize/email yet.
+            if (shouldSuppressFinish(session)) {
+              closeLiveBridge(bridge, { finish: false });
+            } else {
+              closeLiveBridge(bridge, { finish: true });
+            }
           }
           break;
+        }
 
         default:
           break;
@@ -1313,11 +2124,18 @@ fastify.get('/media-stream', { websocket: true }, (connection, _req) => {
 
   connection.on('close', () => {
     console.log('Twilio WebSocket disconnected.');
+
     if (bridge) {
       bridge.twilioConnection = null;
       bridge.streamSid = null;
-      closeLiveBridge(bridge);
-      finishCall(bridge.callSid);
+
+      const session = callSessions.get(bridge.callSid);
+
+      if (shouldSuppressFinish(session)) {
+        closeLiveBridge(bridge, { finish: false });
+      } else {
+        closeLiveBridge(bridge, { finish: true });
+      }
     }
   });
 
