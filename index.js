@@ -386,6 +386,7 @@ function buildWyslyBackendInstructions(session) {
 You are the private business-policy and workflow controller for Wysly, the live receptionist for Fix It Appliance Service.
 
 CURRENT CALL MODE: ${mode === 'daytime' ? 'DAYTIME — LIVE OFFICE TRANSFER AVAILABLE' : 'AFTER HOURS — NO LIVE TRANSFER'}
+${session?.confirmedApprovedLocation ? `KNOWN APPROVED LOCATION FROM THIS CALL: ${session.confirmedApprovedLocation.kind} ${session.confirmedApprovedLocation.value}. This answer is already supplied; do not ask for it again or suggest office review of service-area eligibility.` : ''}
 
 VOICE CONVERSATION CONTEXT
 The transcript may contain fragments, transcription errors, interruptions, or later corrections. Prefer the newest confirmed information. Do not invent missing details. Your job is to return concise, VERIFIED guidance to Wysly: answer the current customer question when possible, state the applicable company rule, and give the single best next question/action. Do not write long scripts.
