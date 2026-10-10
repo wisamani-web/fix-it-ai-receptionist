@@ -665,14 +665,22 @@ Do not include private reasoning. Do not tell Wysly to say "let me check".
 
 function getLatestCustomerText(session) {
   if (!session?.transcriptEvents?.length) return '';
-  const customerEvents = session.transcriptEvents
-    .filter(event => event.speaker === 'Customer')
-    .sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0) || a.sequence - b.sequence);
-
-  if (!customerEvents.length) return '';
-
-  const last = customerEvents[customerEvents.length - 1];
-  return String(last.text || '').replace(/\s+/g, ' ').trim();
+  const events = [...session.transcriptEvents].sort(
+    (a, b) => (a.startMs ?? 0) - (b.startMs ?? 0) || a.sequence - b.sequence
+  );
+  let i = events.length - 1;
+  while (i >= 0 && events[i].speaker !== 'Customer') i--;
+  if (i < 0) return '';
+  const chunks = [];
+  let nextStart = null;
+  for (; i >= 0; i--) {
+    const event = events[i];
+    if (event.speaker !== 'Customer') break;
+    if (nextStart !== null && nextStart - (event.endMs ?? event.startMs ?? 0) >= 1800) break;
+    chunks.unshift(String(event.text || ''));
+    nextStart = event.startMs ?? 0;
+  }
+  return chunks.join('').replace(/\s+/g, ' ').trim();
 }
 
 function getFastPolicyGuidance(session) {
