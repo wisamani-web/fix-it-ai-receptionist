@@ -994,6 +994,11 @@ function recordTranscript(session, speaker, text, startMs, endMs) {
     endMs: Number.isFinite(endMs) ? endMs : Date.now(),
     sequence: session.transcriptSequence++,
   });
+  if (speaker === 'Customer') {
+    // Save an explicitly recognized location for this call, not for other calls.
+    const confirmed = recognizeApprovedLocationAnswer(getLatestCustomerText(session));
+    if (confirmed) session.confirmedApprovedLocation = confirmed;
+  }
 }
 
 function buildReadableTranscript(session) {
