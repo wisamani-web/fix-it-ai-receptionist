@@ -1763,6 +1763,18 @@ async function handleClientDelegation(bridge, delegationId) {
     const decision = await runWyslyController(session);
 
     if (!decision) {
+      // A spoken city can finish transcribing while the backend request is pending.
+      // Never replace an already-approved location with a timeout disclaimer.
+      const localAnswer = getFastPolicyDecision(session);
+      if (localAnswer) {
+        sendLiveEvent(bridge, {
+          type: 'session.commentary.append',
+          event_id: `backend_local_recovery_${Date.now()}`,
+          delegation_id: delegationId,
+          content: safeCommentaryText(localAnswer.spoken_guidance),
+        });
+        return;
+      }
       sendLiveEvent(bridge, {
         type: 'session.commentary.append',
         event_id: `backend_fallback_${Date.now()}`,
