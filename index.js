@@ -771,6 +771,22 @@ function getFastPolicyDecision(session) {
   const lower = latest.toLowerCase();
   const mode = session?.mode || 'after_hours';
 
+  // A caller answering the city/ZIP question should never require an AI lookup.
+  const locationAnswer = recognizeApprovedLocationAnswer(latest);
+  if (locationAnswer) {
+    session.confirmedApprovedLocation = locationAnswer;
+    const label = locationAnswer.kind === 'city'
+      ? `${locationAnswer.value} is one of our approved service cities.`
+      : `ZIP ${locationAnswer.value} is in our approved service area.`;
+    return controllerDecision({
+      spokenGuidance: `${label} Acknowledge this naturally and continue the service intake. Do not ask for the city or ZIP again merely to check coverage. Do not offer office confirmation for this approved location.`,
+      action: 'continue',
+      routing: 'OFFICE FOLLOW-UP',
+      qualified: false,
+      reason: 'Direct approved location answer; no remote policy lookup needed.',
+    });
+  }
+
   // No fake lookup for common manufacturer/warranty calls.
   if (
     /\b(lg|samsung|ge|frigidaire|electrolux|midea|sharp)\b/.test(lower) &&
