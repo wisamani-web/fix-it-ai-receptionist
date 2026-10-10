@@ -386,6 +386,7 @@ function buildWyslyBackendInstructions(session) {
 You are the private business-policy and workflow controller for Wysly, the live receptionist for Fix It Appliance Service.
 
 CURRENT CALL MODE: ${mode === 'daytime' ? 'DAYTIME — LIVE OFFICE TRANSFER AVAILABLE' : 'AFTER HOURS — NO LIVE TRANSFER'}
+${session?.confirmedApprovedLocation ? `KNOWN APPROVED LOCATION FROM THIS CALL: ${session.confirmedApprovedLocation.kind} ${session.confirmedApprovedLocation.value}. This answer is already supplied; do not ask for it again or suggest office review of service-area eligibility.` : ''}
 
 VOICE CONVERSATION CONTEXT
 The transcript may contain fragments, transcription errors, interruptions, or later corrections. Prefer the newest confirmed information. Do not invent missing details. Your job is to return concise, VERIFIED guidance to Wysly: answer the current customer question when possible, state the applicable company rule, and give the single best next question/action. Do not write long scripts.
@@ -665,14 +666,37 @@ Do not include private reasoning. Do not tell Wysly to say "let me check".
 
 function getLatestCustomerText(session) {
   if (!session?.transcriptEvents?.length) return '';
-  const customerEvents = session.transcriptEvents
-    .filter(event => event.speaker === 'Customer')
-    .sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0) || a.sequence - b.sequence);
+  const events = [...session.transcriptEvents].sort(
+    (a, b) => (a.startMs ?? 0) - (b.startMs ?? 0) || a.sequence - b.sequence
+  );
+  let i = events.length - 1;
+  while (i >= 0 && events[i].speaker !== 'Customer') i--;
+  if (i < 0) return '';
+  const chunks = [];
+  let nextStart = null;
+  for (; i >= 0; i--) {
+    const event = events[i];
+    if (event.speaker !== 'Customer') break;
+    if (nextStart !== null && nextStart - (event.endMs ?? event.startMs ?? 0) >= 1800) break;
+    chunks.unshift(String(event.text || ''));
+    nextStart = event.startMs ?? 0;
+  }
+  return chunks.join('').replace(/\s+/g, ' ').trim();
+}
 
-  if (!customerEvents.length) return '';
-
-  const last = customerEvents[customerEvents.length - 1];
-  return String(last.text || '').replace(/\s+/g, ' ').trim();
+function recognizeApprovedLocationAnswer(text) {
+  // Accept an explicit whole-utterance city/ZIP answer, never a substring.
+  const reply = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+    .replace(/[.!?]+$/g, '').replace(/^actually,?\s+/, '');
+  if (!reply || reply.length > 90) return null;
+  const zip = reply.match(/^(?:(?:my|the)\s+)?zip(?:\s+code)?(?:\s+is)?\s+(\d{5})$/)
+    || reply.match(/^(?:(?:it's|it is|in)\s+)?(\d{5})$/);
+  if (zip && APPROVED_SERVICE_ZIPS.has(zip[1])) return { kind: 'zip', value: zip[1] };
+  const spokenCity = reply
+    .replace(/^(?:(?:i|we)\s+live\s+in|(?:i\s+am|i'm|we\s+are|we're)\s+in|(?:my|the)\s+city\s+is|city\s+is|(?:it\s+is|it's)(?:\s+in)?|in|from|located\s+in)\s+/, '')
+    .replace(/,?\s+(?:oh|ohio)$/, '').trim();
+  const city = APPROVED_SERVICE_AREAS.find(value => value.toLowerCase() === spokenCity);
+  return city ? { kind: 'city', value: city } : null;
 }
 
 function getFastPolicyGuidance(session) {
@@ -689,8 +713,8 @@ function getFastPolicyGuidance(session) {
 
   // Deterministic service-area shortcut.
   if (/\b(do you service|service|come to|go to)\b/.test(lower)) {
-    for (const city of APPROVED_SERVICE_AREAS) {
-      if (lower.includes(city.toLowerCase())) {
+    for (const city of [...APPROVED_SERVICE_AREAS].sort((a, b) => b.length - a.length)) {
+      if (new RegExp(`\\b${city}\\b`, 'i').test(latest)) {
         return `Yes. Fix It Appliance Service services ${city}. Answer yes directly and continue naturally. Do not say you are checking.`;
       }
     }
@@ -748,6 +772,22 @@ function getFastPolicyDecision(session) {
   const lower = latest.toLowerCase();
   const mode = session?.mode || 'after_hours';
 
+  // A caller answering the city/ZIP question should never require an AI lookup.
+  const locationAnswer = recognizeApprovedLocationAnswer(latest);
+  if (locationAnswer) {
+    session.confirmedApprovedLocation = locationAnswer;
+    const label = locationAnswer.kind === 'city'
+      ? `${locationAnswer.value} is one of our approved service cities.`
+      : `ZIP ${locationAnswer.value} is in our approved service area.`;
+    return controllerDecision({
+      spokenGuidance: `${label} Acknowledge this naturally and continue the service intake. Do not ask for the city or ZIP again merely to check coverage. Do not offer office confirmation for this approved location.`,
+      action: 'continue',
+      routing: 'OFFICE FOLLOW-UP',
+      qualified: false,
+      reason: 'Direct approved location answer; no remote policy lookup needed.',
+    });
+  }
+
   // No fake lookup for common manufacturer/warranty calls.
   if (
     /\b(lg|samsung|ge|frigidaire|electrolux|midea|sharp)\b/.test(lower) &&
@@ -769,8 +809,8 @@ function getFastPolicyDecision(session) {
 
   // Deterministic service-area answers.
   if (/\b(do you service|service|come to|go to|cover)\b/.test(lower)) {
-    for (const city of APPROVED_SERVICE_AREAS) {
-      if (lower.includes(city.toLowerCase())) {
+    for (const city of [...APPROVED_SERVICE_AREAS].sort((a, b) => b.length - a.length)) {
+      if (new RegExp(`\\b${city}\\b`, 'i').test(latest)) {
         return controllerDecision({
           spokenGuidance: `Yes. Fix It Appliance Service services ${city}. Answer yes directly. Do not say you are checking.`,
           action: 'continue',
@@ -955,6 +995,11 @@ function recordTranscript(session, speaker, text, startMs, endMs) {
     endMs: Number.isFinite(endMs) ? endMs : Date.now(),
     sequence: session.transcriptSequence++,
   });
+  if (speaker === 'Customer') {
+    // Save an explicitly recognized location for this call, not for other calls.
+    const confirmed = recognizeApprovedLocationAnswer(getLatestCustomerText(session));
+    if (confirmed) session.confirmedApprovedLocation = confirmed;
+  }
 }
 
 function buildReadableTranscript(session) {
@@ -1718,6 +1763,18 @@ async function handleClientDelegation(bridge, delegationId) {
     const decision = await runWyslyController(session);
 
     if (!decision) {
+      // A spoken city can finish transcribing while the backend request is pending.
+      // Never replace an already-approved location with a timeout disclaimer.
+      const localAnswer = getFastPolicyDecision(session);
+      if (localAnswer) {
+        sendLiveEvent(bridge, {
+          type: 'session.commentary.append',
+          event_id: `backend_local_recovery_${Date.now()}`,
+          delegation_id: delegationId,
+          content: safeCommentaryText(localAnswer.spoken_guidance),
+        });
+        return;
+      }
       sendLiveEvent(bridge, {
         type: 'session.commentary.append',
         event_id: `backend_fallback_${Date.now()}`,
