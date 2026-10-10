@@ -713,8 +713,8 @@ function getFastPolicyGuidance(session) {
 
   // Deterministic service-area shortcut.
   if (/\b(do you service|service|come to|go to)\b/.test(lower)) {
-    for (const city of APPROVED_SERVICE_AREAS) {
-      if (lower.includes(city.toLowerCase())) {
+    for (const city of [...APPROVED_SERVICE_AREAS].sort((a, b) => b.length - a.length)) {
+      if (new RegExp(`\\b${city}\\b`, 'i').test(latest)) {
         return `Yes. Fix It Appliance Service services ${city}. Answer yes directly and continue naturally. Do not say you are checking.`;
       }
     }
@@ -809,8 +809,8 @@ function getFastPolicyDecision(session) {
 
   // Deterministic service-area answers.
   if (/\b(do you service|service|come to|go to|cover)\b/.test(lower)) {
-    for (const city of APPROVED_SERVICE_AREAS) {
-      if (lower.includes(city.toLowerCase())) {
+    for (const city of [...APPROVED_SERVICE_AREAS].sort((a, b) => b.length - a.length)) {
+      if (new RegExp(`\\b${city}\\b`, 'i').test(latest)) {
         return controllerDecision({
           spokenGuidance: `Yes. Fix It Appliance Service services ${city}. Answer yes directly. Do not say you are checking.`,
           action: 'continue',
