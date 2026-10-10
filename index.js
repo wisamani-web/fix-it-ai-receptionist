@@ -683,6 +683,21 @@ function getLatestCustomerText(session) {
   return chunks.join('').replace(/\s+/g, ' ').trim();
 }
 
+function recognizeApprovedLocationAnswer(text) {
+  // Accept an explicit whole-utterance city/ZIP answer, never a substring.
+  const reply = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+    .replace(/[.!?]+$/g, '').replace(/^actually,?\s+/, '');
+  if (!reply || reply.length > 90) return null;
+  const zip = reply.match(/^(?:(?:my|the)\s+)?zip(?:\s+code)?(?:\s+is)?\s+(\d{5})$/)
+    || reply.match(/^(?:(?:it's|it is|in)\s+)?(\d{5})$/);
+  if (zip && APPROVED_SERVICE_ZIPS.has(zip[1])) return { kind: 'zip', value: zip[1] };
+  const spokenCity = reply
+    .replace(/^(?:(?:i|we)\s+live\s+in|(?:i\s+am|i'm|we\s+are|we're)\s+in|(?:my|the)\s+city\s+is|city\s+is|(?:it\s+is|it's)(?:\s+in)?|in|from|located\s+in)\s+/, '')
+    .replace(/,?\s+(?:oh|ohio)$/, '').trim();
+  const city = APPROVED_SERVICE_AREAS.find(value => value.toLowerCase() === spokenCity);
+  return city ? { kind: 'city', value: city } : null;
+}
+
 function getFastPolicyGuidance(session) {
   const latest = getLatestCustomerText(session);
   if (!latest) return null;
